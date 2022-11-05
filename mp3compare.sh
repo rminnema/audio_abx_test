@@ -84,6 +84,7 @@ select_program() {
     if ! grep -q "no_skip" <<< "$*"; then
         numbered "(N) Next track" && options+=( "N" )
     fi
+    numbered "(C) Change bitrate" && options+=( "C" )
     numbered "(S) Save clip" && options+=( "S" )
     numbered "(Q) Quit" && options+=( "Q" )
     while ! program_selection=$(user_selection "Selection: " $(seq $count) "${options[@]^^}" "${options[@],,}"); do
@@ -145,6 +146,12 @@ select_program() {
                     fi
                     ;;
             esac
+            ;;
+        C|c)
+            select_bitrate
+            create_clip
+            select_program
+            return 0
             ;;
         N|n)
             return 0
@@ -261,6 +268,52 @@ sanitize_timestamps() {
     clip_duration=$(bc <<< "$endsec - $startsec")
 }
 
+select_bitrate() {
+    count=1
+    for btrt in 320 256 128 96 64 32; do
+        numbered "$btrt kbps"
+    done
+    numbered "Custom"
+    numbered "Quit"
+    while ! bitrate_selection=$(user_selection "Selection: " $(seq "$count")); do
+        warn "Invalid selection: '$bitrate_selection'"
+        echo >&2
+    done
+    case "$bitrate_selection" in
+        1)
+            bitrate=320k ;;
+        2)
+            bitrate=256k ;;
+        3)
+            bitrate=128k ;;
+        4)
+            bitrate=96k ;;
+        5)
+            bitrate=64k ;;
+        6)
+            bitrate=32k ;;
+        7)
+            read -rn4 -p "Bitrate (between 32k and 320k): " bitrate
+            if ! [[ "$bitrate" =~ k ]]; then
+                bitrate+=k
+            fi
+            if ! [[ "$bitrate" =~ ^[0-9]+k$ ]]; then
+                errr "You must provide a bitrate in the standard format"
+            fi
+            if (( ${bitrate::-1} < 32 )); then
+                bitrate=32k
+            elif (( ${bitrate::-1} > 320 )); then
+                bitrate=320k
+            fi
+            echo "Bitrate selection is $bitrate"
+            ;;
+        8)
+            exit 0 ;;
+        *)
+            errr "Input must be between 1 and 8" ;;
+    esac
+}
+
 if [[ -f mp3compare.cfg ]]; then
     source mp3compare.cfg
 fi
@@ -270,7 +323,7 @@ while (( $# > 0 )); do
     shift
     case "$param" in
         --music_dir)
-            music_dir=$1 
+            music_dir=$1
             shift
             ;;
         --clips_dir)
@@ -305,51 +358,7 @@ incorrect=0
 accuracy=0
 trap show_results_and_cleanup EXIT
 
-echo "1. 320 kbps"
-echo "2. 256 kbps"
-echo "3. 128 kbps"
-echo "4. 96 kbps"
-echo "5. 64 kbps"
-echo "6. 32 kbps"
-echo "7. Custom"
-echo "8. Quit"
-while ! bitrate_selection=$(user_selection "Selection: " $(seq 8)); do
-    warn "Invalid selection: '$bitrate_selection'"
-    echo >&2
-done
-case "$bitrate_selection" in
-    1)
-        bitrate=320k ;;
-    2)
-        bitrate=256k ;;
-    3)
-        bitrate=128k ;;
-    4)
-        bitrate=96k ;;
-    5)
-        bitrate=64k ;;
-    6)
-        bitrate=32k ;;
-    7)
-        read -rn4 -p "Bitrate (between 32k and 320k): " bitrate
-        if ! [[ "$bitrate" =~ k ]]; then
-            bitrate+=k
-        fi
-        if ! [[ "$bitrate" =~ ^[0-9]+k$ ]]; then
-            errr "You must provide a bitrate in the standard format"
-        fi
-        if (( ${bitrate::-1} < 32 )); then
-            bitrate=32k
-        elif (( ${bitrate::-1} > 320 )); then
-            bitrate=320k
-        fi
-        echo "Bitrate selection is $bitrate"
-        ;;
-    8)
-        exit 0 ;;
-    *)
-        errr "Input must be between 1 and 8" ;;
-esac
+select_bitrate
 
 while ! random=$(user_selection "Fully random (y/n): " Y y N n); do
     echo "Invalid selection: '$random'"
@@ -411,7 +420,7 @@ while true; do
         *ffprobe)
             ffprobe_track="$track" ;;
     esac
-    
+
     fmt="default=noprint_wrappers=1:nokey=1"
     track_duration=$("${ffprobe:?}" -v error -select_streams a -show_entries stream=duration -of "$fmt" "$ffprobe_track" |
         sed 's/\r//g')
