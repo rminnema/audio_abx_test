@@ -1,9 +1,5 @@
 #!/bin/bash
 
-#set -To pipefail
-#trap 'echo "+ $LINENO : $BASH_COMMAND" >&2' DEBUG
-#set -xo pipefail
-
 errr() { echo "ERROR: $*" >&2; exit 1; }
 warn() { echo "WARNING: $*" >&2; }
 
@@ -57,7 +53,7 @@ parse_timespec_to_seconds() {
 }
 
 play_clip() {
-    case "$vlc" in
+    case "${vlc:?}" in
         *vlc.exe)
             local vlc_lossless_clip="$lossless_clip_w"
             local vlc_lossy_clip="$lossy_clip_w"
@@ -70,9 +66,9 @@ play_clip() {
 
     case "$format" in
         lossless)
-            "$vlc" "$vlc_lossless_clip" &>/dev/null || errr "VLC could not play the clip" ;;
+            "${vlc:?}" "$vlc_lossless_clip" &>/dev/null || errr "VLC could not play the clip" ;;
         lossy)
-            "$vlc" "$vlc_lossy_clip" &>/dev/null || errr "VLC could not play the clip" ;;
+            "${vlc:?}" "$vlc_lossy_clip" &>/dev/null || errr "VLC could not play the clip" ;;
     esac
 }
 
@@ -117,22 +113,36 @@ select_program() {
             save_file_basename=$(sed 's/\//-/g' <<< "$artist -- $album -- $title")
             case "$save_choice" in
                 1)
-                    while [[ -f "$clips_dir/$save_file_basename -- lossless.$i.wav" ]]; do
+                    save_file="$clips_dir/$save_file_basename -- lossless.$i.flac"
+                    while [[ -f "$save_file" ]]; do
                         i=$(( i + 1 ))
+                        save_file="$clips_dir/$save_file_basename -- lossless.$i.flac"
                     done
-                    if ! cp "$lossless_clip" "$clips_dir/$save_file_basename -- lossless.$i.wav"; then
-                        errr "Could not save lossless clip."
+                    if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
+                        touch "$save_file"
+                        save_file=$(wslpath -w "$save_file")
                     fi
-                    echo "Lossless clip saved to $clips_dir/$save_file_basename -- lossless.$i.wav"
+                    if ! "${ffmpeg:?}" -y -loglevel error -i "$lossless_clip" "$save_file"; then
+                        warn "Could not save lossless clip."
+                    else
+                        echo "Lossless clip saved to $save_file"
+                    fi
                     ;;
                 2)
-                    while [[ -f "$clips_dir/$save_file_basename -- lossy.$i.wav" ]]; do
+                    save_file="$clips_dir/$save_file_basename -- lossy.$i.flac"
+                    while [[ -f "$save_file" ]]; do
                         i=$(( i + 1 ))
+                        save_file="$clips_dir/$save_file_basename -- lossy.$i.flac"
                     done
-                    if ! cp "$lossy_clip" "$clips_dir/$save_file_basename -- lossy.$i.wav"; then
-                        errr "Could not save lossy clip."
+                    if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
+                        touch "$save_file"
+                        save_file=$(wslpath -w "$save_file")
                     fi
-                    echo "Lossy clip saved to $clips_dir/$save_file_basename -- lossy.$i.wav"
+                    if ! "${ffmpeg:?}" -y -loglevel error -i "$lossy_clip" "$save_file"; then
+                        warn "Could not save lossy clip"
+                    else
+                        echo "Lossless clip saved to $save_file"
+                    fi
                     ;;
             esac
             ;;
@@ -152,8 +162,7 @@ select_program() {
                 user_timestamps
             else
                 if ! random_timestamps; then
-                    echo "Something went wrong with random timestamps" >&2
-                    break
+                    errr "Something went wrong with random timestamps"
                 fi
             fi
             echo "${startsec}s - ${endsec}s"
@@ -170,7 +179,7 @@ numbered() {
 }
 
 create_clip() {
-    case "$ffmpeg" in
+    case "${ffmpeg:?}" in
         *.exe)
             local ffmpeg_track="$track_w"
             local ffmpeg_lossless_clip="$lossless_clip_w"
@@ -186,11 +195,11 @@ create_clip() {
     trap 'rm -f "$tmp_mp3"' RETURN
     local tmp_mp3; tmp_mp3=$(mktemp --suffix=.mp3)
 
-    "$ffmpeg" -loglevel error -y -i "$ffmpeg_track" \
+    "${ffmpeg:?}" -loglevel error -y -i "$ffmpeg_track" \
         -ss "$startsec" -t "$clip_duration" "$ffmpeg_lossless_clip" \
         -ss "$startsec" -t "$clip_duration" -b:a "$bitrate" "$tmp_mp3"
 
-    "$ffmpeg" -loglevel error -y -i "$tmp_mp3" "$ffmpeg_lossy_clip"
+    "${ffmpeg:?}" -loglevel error -y -i "$tmp_mp3" "$ffmpeg_lossy_clip"
 }
 
 random_timestamps() {
@@ -204,18 +213,16 @@ random_timestamps() {
 }
 
 user_timestamps() {
-    false
-    while (( $? )); do
+    while true; do
         read -rp "Start timestamp: " startts
         echo
-        startsec=$(parse_timespec_to_seconds "$startts")
+        startsec=$(parse_timespec_to_seconds "$startts") && break
     done
 
-    false
-    while (( $? )); do
+    while true; do
         read -rp "End timestamp: " endts
         echo
-        endsec=$(parse_timespec_to_seconds "$endts")
+        endsec=$(parse_timespec_to_seconds "$endts") && break
     done
 
     sanitize_timestamps
@@ -275,23 +282,19 @@ while (( $# > 0 )); do
     esac
 done
 
-if [[ -z "$music_dir" || -z "$clips_dir" ]]; then
-    errr "You must supply paths to the music and clips dirs."
-fi
-
-if [[ ! -d "$music_dir" ]]; then
+if [[ ! -d "${music_dir:?}" ]]; then
     errr "'$music_dir' directory does not exist."
 fi
 
-if [[ ! -d "$clips_dir" ]]; then
+if [[ ! -d "${clips_dir:?}" ]]; then
     errr "'$clips_dir' directory does not exist."
 fi
 
 commands=( ffmpeg vlc mediainfo ffprobe )
 for cmd in "${commands[@]}"; do
-    cmd_set="! $cmd=\$(command -v '$cmd.exe') && ! $cmd=\$(command -v '$cmd')"
-    if eval "$cmd_set"; then
-        errr "'$cmd' was not found"
+    cmd_set="$cmd=\$(command -v '$cmd.exe') || $cmd=\$(command -v '$cmd')"
+    if ! eval "$cmd_set"; then
+        warn "'$cmd' was not found"
     fi
 done
 
@@ -353,8 +356,16 @@ while ! random=$(user_selection "Fully random (y/n): " Y y N n); do
     echo >&2
 done
 
-mapfile -t alltracks < <(find "$music_dir" -type f -iname "*.flac")
-#mapfile -t alltracks < <(find "$music_dir" -type f -a \( -iname "*.flac" -o -iname "*.m4a" -o -iname "*.mp3" \))
+while ! source_quality=$(user_selection "Source quality (L for lossless, M for mixed lossy/lossless): " L l M m); do
+    echo "Invalid selection: '$source_quality'"
+    echo >&2
+done
+
+if [[ "$source_quality" =~ [Ll] ]]; then
+    mapfile -t alltracks < <(find "$music_dir" -type f -iname "*.flac")
+else
+    mapfile -t alltracks < <(find "$music_dir" -type f -a \( -iname "*.flac" -o -iname "*.m4a" -o -iname "*.mp3" \))
+fi
 
 if (( ${#alltracks[@]} == 0 )); then
     errr "No tracks were found in '$music_dir'"
@@ -394,7 +405,7 @@ while true; do
         track=${tracks[0]}
     fi
     track_w=$(wslpath -w "$track")
-    case "$ffprobe" in
+    case "${ffprobe:?}" in
         *ffprobe.exe)
             ffprobe_track="$track_w" ;;
         *ffprobe)
@@ -402,7 +413,8 @@ while true; do
     esac
     
     fmt="default=noprint_wrappers=1:nokey=1"
-    track_duration=$("$ffprobe" -v error -select_streams a -show_entries stream=duration -of "$fmt" "$ffprobe_track" | sed 's/\r//g')
+    track_duration=$("${ffprobe:?}" -v error -select_streams a -show_entries stream=duration -of "$fmt" "$ffprobe_track" |
+        sed 's/\r//g')
     track_duration_int=$(grep -Eo "^[0-9]*" <<< "$track_duration")
     echo
     if [[ -z "$search_string" ]]; then
@@ -415,13 +427,13 @@ while true; do
         fi
     fi
 
-    case "$mediainfo" in
+    case "${mediainfo:?}" in
         *.exe)
             mediainfo_track="$track_w" ;;
         *)
             mediainfo_track="$track" ;;
     esac
-    IFS='|' read -r artist album title < <("$mediainfo" --output="General;%Artist%|%Album%|%Title%" "$mediainfo_track")
+    IFS='|' read -r artist album title < <("${mediainfo:?}" --output="General;%Artist%|%Album%|%Title%" "$mediainfo_track")
 
     echo "Artist: $artist"
     echo "Album: $album"
@@ -457,7 +469,7 @@ while true; do
             forfeit=false
             no_skip=true
             while true; do
-                while ! retry_guess_forfeit=$(user_selection "Guess (G), listen again/retry (R), or forfeit (F): " G g R r F f); do
+                while ! retry_guess_forfeit=$(user_selection "Guess (G), Retry (R), or forfeit (F): " G g R r F f); do
                     warn "Invalid selection: '$retry_guess_forfeit'"
                     echo >&2
                 done
