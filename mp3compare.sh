@@ -53,23 +53,33 @@ parse_timespec_to_seconds() {
 }
 
 play_clip() {
-    case "${vlc:?}" in
-        *vlc.exe)
-            local vlc_lossless_clip="$lossless_clip_w"
-            local vlc_lossy_clip="$lossy_clip_w"
-            ;;
-        *vlc)
-            local vlc_lossless_clip="$lossless_clip"
-            local vlc_lossy_clip="$lossy_clip"
-            ;;
-    esac
+    if [[ "$x_clip" ]]; then
+        case "${vlc:?}" in
+            *vlc.exe)
+                local vlc_x_clip; vlc_x_clip=$(wslpath -w "$x_clip") ;;
+            *vlc)
+                local vlc_x_clip=$x_clip ;;
+        esac
 
-    case "$format" in
-        lossless)
-            "${vlc:?}" "$vlc_lossless_clip" &>/dev/null || errr "VLC could not play the clip" ;;
-        lossy)
-            "${vlc:?}" "$vlc_lossy_clip" &>/dev/null || errr "VLC could not play the clip" ;;
-    esac
+        "${vlc:?}" "$vlc_x_clip" &>/dev/null || errr "VLC could not play the clip"
+    else
+        case "${vlc:?}" in
+            *vlc.exe)
+                local vlc_lossless_clip="$lossless_clip_w"
+                local vlc_lossy_clip="$lossy_clip_w"
+                ;;
+            *vlc)
+                local vlc_lossless_clip="$lossless_clip"
+                local vlc_lossy_clip="$lossy_clip"
+                ;;
+        esac
+        case "$format" in
+            lossless)
+                "${vlc:?}" "$vlc_lossless_clip" &>/dev/null || errr "VLC could not play the clip" ;;
+            lossy)
+                "${vlc:?}" "$vlc_lossy_clip" &>/dev/null || errr "VLC could not play the clip" ;;
+        esac
+    fi
 }
 
 select_program() {
@@ -99,10 +109,14 @@ select_program() {
         B|b)
             format=lossy ;;
         X|x)
+            x_clips+=( "$(mktemp --suffix=.wav)" )
+            x_clip=${x_clips[-1]}
             if (( randombit )); then
                 format=lossless
+                cp "$lossless_clip" "$x_clip"
             else
                 format=lossy
+                cp "$lossy_clip" "$x_clip"
             fi
             ;;
         S|s)
@@ -148,6 +162,7 @@ select_program() {
             esac
             ;;
         C|c)
+            warn "Resetting score"
             select_bitrate
             create_clip
             select_program
@@ -241,7 +256,7 @@ show_results_and_cleanup() {
         echo "$accuracy%"
         echo "$correct tracks guessed correctly"
     fi
-    rm -f "${lossless_clips[@]}" "${lossy_clips[@]}"
+    rm -f "${lossless_clips[@]}" "${lossy_clips[@]}" "${x_clips[@]}"
 }
 
 sanitize_timestamps() {
@@ -270,6 +285,9 @@ sanitize_timestamps() {
 
 select_bitrate() {
     count=1
+    accuracy=0
+    correct=0
+    incorrect=0
     for btrt in 320 256 128 96 64 32; do
         numbered "$btrt kbps"
     done
@@ -381,6 +399,7 @@ if (( ${#alltracks[@]} == 0 )); then
 fi
 
 while true; do
+    unset x_clip
     if ! [[ "$random" =~ [Yy] ]]; then
         read -rp "Track search string: " search_string
     fi
@@ -422,8 +441,8 @@ while true; do
     esac
 
     fmt="default=noprint_wrappers=1:nokey=1"
-    track_duration=$("${ffprobe:?}" -v error -select_streams a -show_entries stream=duration -of "$fmt" "$ffprobe_track" |
-        sed 's/\r//g')
+    ffprobe_opts=( -v error -select_streams a -show_entries stream=duration -of "$fmt" "$ffprobe_track" )
+    track_duration=$("${ffprobe:?}" "${ffprobe_opts[@]}" | sed 's/\r//g')
     track_duration_int=$(grep -Eo "^[0-9]*" <<< "$track_duration")
     echo
     if [[ -z "$search_string" ]]; then
