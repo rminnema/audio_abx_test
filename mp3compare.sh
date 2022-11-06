@@ -122,6 +122,7 @@ select_program() {
             ;;
         T|t)
             warn "Resetting score"
+            print_results
             correct=0
             incorrect=0
             skipped=0
@@ -287,7 +288,7 @@ select_bitrate() {
     esac
     echo
     if [[ -z "$last_bitrate" || "$bitrate" != "$last_bitrate" ]]; then
-        [[ "$last_bitrate" ]] && warn "Resetting score"
+        [[ "$last_bitrate" ]] && warn "Resetting score" && print_results
         accuracy=0
         correct=0
         incorrect=0
