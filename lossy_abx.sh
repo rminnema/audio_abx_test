@@ -127,8 +127,6 @@ select_program() {
             incorrect=0
             skipped=0
             accuracy=0
-            tracks_seen=()
-            guesses=()
             results=()
             return 0
             ;;
@@ -293,8 +291,6 @@ select_bitrate() {
         correct=0
         incorrect=0
         skipped=0
-        tracks_seen=()
-        guesses=()
         results=()
     fi
 }
@@ -381,11 +377,11 @@ while (( $# > 0 )); do
     esac
 done
 
-if [[ ! -d "${music_dir:?}" ]]; then
+if [[ ! -d "$music_dir" ]]; then
     errr "'$music_dir' directory does not exist."
 fi
 
-if [[ ! -d "${clips_dir:?}" ]]; then
+if [[ ! -d "$clips_dir" ]]; then
     errr "'$clips_dir' directory does not exist."
 fi
 
