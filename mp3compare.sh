@@ -41,11 +41,11 @@ parse_timespec_to_seconds() {
     fi
     local integer_seconds; integer_seconds=$(awk -F '.' '{ print $1 }' <<< "$seconds")
     local fractional_seconds; fractional_seconds=$(awk -F '.' '{ print $2 }' <<< "$seconds" | sed 's/0*$//')
-    if (( integer_seconds > 59 )); then
+    if (( 10#$integer_seconds > 59 )); then
         minutes=$(( minutes + 1 ))
         integer_seconds=$(( seconds - 60 ))
     fi
-    if (( minutes > 59 )); then
+    if (( 10#$minutes > 59 )); then
         hours=$(( hours + 1 ))
         minutes=$(( minutes - 60 ))
     fi
@@ -149,7 +149,6 @@ select_program() {
                     return 0
                 fi
             fi
-            echo "$(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)"
             create_clip
             ;;
         *)
@@ -241,7 +240,7 @@ sanitize_timestamps() {
 
 select_bitrate() {
     count=0
-    for btrt in 320 256 128 96 64 32; do
+    for btrt in 320 256 128 112 96 64 32; do
         if [[ "$bitrate" && "$btrt" == "${bitrate::-1}" ]]; then
             numbered_option "$GREEN$btrt kbps$NOCOLOR"
         else
@@ -261,12 +260,14 @@ select_bitrate() {
         3)
             bitrate=128k ;;
         4)
-            bitrate=96k ;;
+            bitrate=112k ;;
         5)
-            bitrate=64k ;;
+            bitrate=96k ;;
         6)
-            bitrate=32k ;;
+            bitrate=64k ;;
         7)
+            bitrate=32k ;;
+        8)
             read -rn4 -p "Bitrate (between 32k and 320k): " bitrate
             if ! [[ "$bitrate" =~ k ]]; then
                 bitrate+=k
@@ -436,9 +437,11 @@ fi
 while true; do
     if ! [[ "$random" =~ [Yy] ]]; then
         read -rp "Track search string: " search_string
+        echo
     fi
     if [[ -z "$search_string" ]]; then
         echo "Will choose a random track"
+        echo
         max_idx=$(( ${#alltracks[@]} - 1 ))
         rand_idx=$(shuf -i 0-"$max_idx" -n 1 --random-source=/dev/urandom)
         track="${alltracks[$rand_idx]}"
