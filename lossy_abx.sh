@@ -372,8 +372,8 @@ print_results() {
     echo
 }
 
-if [[ -f mp3compare.cfg ]]; then
-    source mp3compare.cfg
+if [[ -f lossy_abx.cfg ]]; then
+    source lossy_abx.cfg
 fi
 
 while (( $# > 0 )); do
@@ -401,8 +401,7 @@ if [[ ! -d "${clips_dir:?}" ]]; then
     errr "'$clips_dir' directory does not exist."
 fi
 
-commands=( ffmpeg vlc mediainfo ffprobe )
-for cmd in "${commands[@]}"; do
+for cmd in ffmpeg vlc mediainfo ffprobe; do
     cmd_set="$cmd=\$(command -v '$cmd.exe') || $cmd=\$(command -v '$cmd')"
     if ! eval "$cmd_set"; then
         warn "'$cmd' was not found"
