@@ -1,14 +1,19 @@
 #!/bin/bash
 
-errr() { echo "ERROR: $*" >&2; exit 1; }
-warn() { echo "WARNING: $*" >&2; }
+readonly RED=$'\E[31m'
+readonly GREEN=$'\E[32m'
+readonly YELLOW=$'\E[33m'
+readonly NOCOLOR=$'\E[0m'
+
+errr() { echo "${RED}ERROR:${NOCOLOR} $*" >&2; exit 1; }
+warn() { echo "${YELLOW}WARNING:${NOCOLOR} $*" >&2; }
 
 user_selection() {
     local prompt=$1
     shift
     local options=( "$@" )
     local selection
-    read -rn 1 -p "$prompt" selection
+    read -rp "$prompt" selection
     echo >&2
     for option in "${options[@]}"; do
         if [[ "$selection" == "$option" ]]; then
@@ -53,37 +58,18 @@ parse_timespec_to_seconds() {
 }
 
 play_clip() {
-    if [[ "$x_clip" ]]; then
-        case "${vlc:?}" in
-            *vlc.exe)
-                local vlc_x_clip; vlc_x_clip=$(wslpath -w "$x_clip") ;;
-            *vlc)
-                local vlc_x_clip=$x_clip ;;
-        esac
-
-        "${vlc:?}" "$vlc_x_clip" &>/dev/null || errr "VLC could not play the clip"
+    if [[ "${vlc:?}" == *vlc.exe ]]; then
+        local vlc_clip
+        vlc_clip=$(wslpath -w "$1")
     else
-        case "${vlc:?}" in
-            *vlc.exe)
-                local vlc_lossless_clip="$lossless_clip_w"
-                local vlc_lossy_clip="$lossy_clip_w"
-                ;;
-            *vlc)
-                local vlc_lossless_clip="$lossless_clip"
-                local vlc_lossy_clip="$lossy_clip"
-                ;;
-        esac
-        case "$format" in
-            lossless)
-                "${vlc:?}" "$vlc_lossless_clip" &>/dev/null || errr "VLC could not play the clip" ;;
-            lossy)
-                "${vlc:?}" "$vlc_lossy_clip" &>/dev/null || errr "VLC could not play the clip" ;;
-        esac
+        local vlc_clip=$1
     fi
+
+    "${vlc:?}" "$vlc_clip" &>/dev/null || errr "VLC could not play the clip"
 }
 
 select_program() {
-    count=1
+    count=0
     local options=()
     numbered_option "(A) A test (original quality)" && options+=( "A" )
     numbered_option "(B) B test (${bitrate::-1} kbps lossy)" && options+=( "B" )
@@ -95,12 +81,14 @@ select_program() {
         numbered_option "(N) Next track" && options+=( "N" )
     fi
     numbered_option "(C) Change bitrate" && options+=( "C" )
+    numbered_option "(P) Print results" && options+=( "P" )
     numbered_option "(T) Reset score" && options+=( "T" )
     numbered_option "(S) Save clip" && options+=( "S" )
     numbered_option "(Q) Quit" && options+=( "Q" )
     while ! program_selection=$(user_selection "Selection: " $(seq $count) "${options[@]^^}" "${options[@],,}"); do
         return 1
     done
+    echo >&2
     if [[ "$program_selection" =~ ^[0-9]+$ ]]; then
         program_selection=${options[$(( program_selection - 1 ))]}
     fi
@@ -110,8 +98,9 @@ select_program() {
         B|b)
             format=lossy ;;
         X|x)
-            x_clips+=( "$(mktemp --suffix=.wav)" )
-            x_clip=${x_clips[-1]}
+            if [[ ! -f "$x_clip" ]]; then
+                x_clip=$(mktemp --suffix=.wav)
+            fi
             if (( randombit )); then
                 format=lossless
                 cp "$lossless_clip" "$x_clip"
@@ -121,46 +110,10 @@ select_program() {
             fi
             ;;
         S|s)
-            while ! save_choice=$(user_selection "1 for lossless, 2 for lossy:" 1 2); do
-                warn "Invalid selection: '$save_choice'"
-                echo >&2
-            done
-            i=1
-            save_file_basename=$(sed 's/\//-/g' <<< "$artist -- $album -- $title")
-            case "$save_choice" in
-                1)
-                    save_file="$clips_dir/$save_file_basename -- lossless.$i.flac"
-                    while [[ -f "$save_file" ]]; do
-                        i=$(( i + 1 ))
-                        save_file="$clips_dir/$save_file_basename -- lossless.$i.flac"
-                    done
-                    if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
-                        touch "$save_file"
-                        save_file=$(wslpath -w "$save_file")
-                    fi
-                    if ! "${ffmpeg:?}" -y -loglevel error -i "$lossless_clip" "$save_file"; then
-                        warn "Could not save lossless clip."
-                    else
-                        echo "Lossless clip saved to $save_file"
-                    fi
-                    ;;
-                2)
-                    save_file="$clips_dir/$save_file_basename -- lossy.$i.flac"
-                    while [[ -f "$save_file" ]]; do
-                        i=$(( i + 1 ))
-                        save_file="$clips_dir/$save_file_basename -- lossy.$i.flac"
-                    done
-                    if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
-                        touch "$save_file"
-                        save_file=$(wslpath -w "$save_file")
-                    fi
-                    if ! "${ffmpeg:?}" -y -loglevel error -i "$lossy_clip" "$save_file"; then
-                        warn "Could not save lossy clip"
-                    else
-                        echo "Lossless clip saved to $save_file"
-                    fi
-                    ;;
-            esac
+            save_clip
+            ;;
+        P|p)
+            print_results
             ;;
         C|c)
             warn "Resetting score"
@@ -175,6 +128,9 @@ select_program() {
             incorrect=0
             skipped=0
             accuracy=0
+            tracks_seen=()
+            guesses=()
+            results=()
             return 0
             ;;
         N|n)
@@ -193,7 +149,8 @@ select_program() {
                 user_timestamps
             else
                 if ! random_timestamps; then
-                    errr "Something went wrong with random timestamps"
+                    warn "Something went wrong with random timestamps"
+                    return 0
                 fi
             fi
             echo "${startsec}s - ${endsec}s"
@@ -205,8 +162,8 @@ select_program() {
 }
 
 numbered_option() {
-    echo "$count. $*"
     count=$(( count + 1 ))
+    echo "$count. $*"
 }
 
 create_clip() {
@@ -246,13 +203,13 @@ random_timestamps() {
 user_timestamps() {
     while true; do
         read -rp "Start timestamp: " startts
-        echo
+        echo >&2
         startsec=$(parse_timespec_to_seconds "$startts") && break
     done
 
     while true; do
         read -rp "End timestamp: " endts
-        echo
+        echo >&2
         endsec=$(parse_timespec_to_seconds "$endts") && break
     done
 
@@ -260,13 +217,14 @@ user_timestamps() {
 }
 
 show_results_and_cleanup() {
-    if (( correct + incorrect > 0 )); then
-        echo "After $(( correct + incorrect )) trials, your accuracy was:"
-        echo "$accuracy%"
-        echo "$correct tracks guessed correctly"
-        echo "$skipped tracks skipped"
-    fi
-    rm -f "${lossless_clips[@]}" "${lossy_clips[@]}" "${x_clips[@]}"
+    #if (( correct + incorrect > 0 )); then
+    #    echo "After $(( correct + incorrect )) trials, your accuracy was:"
+    #    echo "$accuracy%"
+    #    echo "$correct tracks guessed correctly"
+    #    echo "$skipped tracks skipped"
+    #fi
+    print_results
+    rm -f "${lossless_clips[@]}" "${lossy_clips[@]}" "$x_clip"
 }
 
 sanitize_timestamps() {
@@ -294,11 +252,14 @@ sanitize_timestamps() {
 }
 
 select_bitrate() {
-    count=1
+    count=0
     accuracy=0
     correct=0
     incorrect=0
     skipped=0
+    tracks_seen=()
+    guesses=()
+    results=()
     for btrt in 320 256 128 96 64 32; do
         numbered_option "$btrt kbps"
     done
@@ -323,6 +284,7 @@ select_bitrate() {
             bitrate=32k ;;
         7)
             read -rn4 -p "Bitrate (between 32k and 320k): " bitrate
+            echo >&2
             if ! [[ "$bitrate" =~ k ]]; then
                 bitrate+=k
             fi
@@ -341,6 +303,79 @@ select_bitrate() {
         *)
             errr "Input must be between 1 and 8" ;;
     esac
+}
+
+save_clip() {
+    local save_choice_1
+    while ! save_choice_1=$(user_selection "1 to save lossless, 2 for lossy: " 1 2); do
+        warn "Invalid selection: '$save_choice_1'"
+        echo >&2
+    done
+    local save_choice_2
+    while ! save_choice_2=$(user_selection "1 to save as WAV, 2 as FLAC: " 1 2); do
+        warn "Invalid selection: '$save_choice_2'"
+        echo >&2
+    done
+    i=1
+    local save_file_basename && save_file_basename=$(sed 's/\//-/g' <<< "$artist -- $album -- $title")
+    if [[ "$save_choice_1" == 1 ]]; then
+        local compression=lossless
+        local clip_to_save="$lossless_clip"
+    else
+        local compression=lossy
+        local clip_to_save="$lossy_clip"
+    fi
+    if [[ "$save_choice_2" == 1 ]]; then
+        local file_fmt=wav
+    else
+        local file_fmt=flac
+    fi
+    local save_file="$clips_dir/$save_file_basename -- $compression.$i.$file_fmt"
+    while [[ -f "$save_file" ]]; do
+        save_file="$clips_dir/$save_file_basename -- $compression.$(( ++i )).$file_fmt"
+    done
+
+    if [[ "$save_choice_2" == 1 ]]; then
+        if cp "$clip_to_save" "$save_file"; then
+            echo "$compression clip saved to $save_file"
+        else
+            warn "Could not save $save_file"
+        fi
+    else
+        if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
+            touch "$save_file"
+            save_file=$(wslpath -w "$save_file")
+        fi
+        if "${ffmpeg:?}" -y -loglevel error -i "$clip_to_save" "$save_file"; then
+            echo "$compression clip saved to $save_file"
+        else
+            warn "Could not save $save_file"
+        fi
+    fi
+}
+
+print_results() {
+    if (( ${#guesses[@]} != ${#results[@]} || ${#results[@]} != ${#tracks_seen[@]} )); then
+        errr "You did something wrong."
+    fi
+    {
+        echo "Current bitrate: ${bitrate}bps"
+        echo "File|Result|Guess"
+        for (( i=0; i < ${#guesses[@]}; i++ )); do
+            local guess=${guesses[$i]}
+            local result=${results[$i]}
+            if [[ "$guess" == "$result" && "${result^^}" != "SKIPPED" ]]; then
+                color=$GREEN
+            elif [[ "${result^^}" == "SKIPPED" ]]; then
+                color=$YELLOW
+            else
+                color=$RED
+            fi
+            echo "${tracks_seen[$i]}|$result|$color$guess$NOCOLOR"
+        done
+    } | column -ts '|'
+    echo "$accuracy% accuracy, $correct/$(( correct + incorrect )), $skipped skipped"
+    echo
 }
 
 if [[ -f mp3compare.cfg ]]; then
@@ -386,7 +421,7 @@ lossy_clips=()
 select_bitrate
 trap show_results_and_cleanup EXIT
 
-while ! random=$(user_selection "Fully random (y/n): " Y y N n); do
+while ! random=$(user_selection "Fully random song and timestamp selection (y/n): " Y y N n); do
     echo "Invalid selection: '$random'"
     echo >&2
 done
@@ -407,38 +442,38 @@ if (( ${#alltracks[@]} == 0 )); then
 fi
 
 while true; do
-    unset x_clip
     if ! [[ "$random" =~ [Yy] ]]; then
         read -rp "Track search string: " search_string
+        echo >&2
     fi
     echo
     if [[ -z "$search_string" ]]; then
         echo "Will choose a random track"
-        max=$(( ${#alltracks[@]} - 1 ))
-        rand_idx=$(shuf -i 0-"$max" -n 1)
-        tracks=( "${alltracks[$rand_idx]}" )
+        max_idx=$(( ${#alltracks[@]} - 1 ))
+        rand_idx=$(shuf -i 0-"$max_idx" -n 1 --random-source=/dev/urandom)
+        track="${alltracks[$rand_idx]}"
     else
-        mapfile -t tracks < <(find "$music_dir" -type f -iname "*$search_string*")
-    fi
-    if (( ${#tracks[@]} == 0 )); then
-        echo "No tracks matched"
-        continue
-    elif (( ${#tracks[@]} > 10 )); then
-        echo "Too many tracks matched"
-        continue
-    elif (( ${#tracks[@]} > 1 )); then
-        echo "Multiple tracks matched: choose the correct track below:"
-        for i in "${!tracks[@]}"; do
-            echo "$i : ${tracks[$i]}"
-        done
-        read -rp "Index: " index
-        echo
-        if [[ -z "$index" || "$index" =~ [^0-9] ]] || (( index >= ${#tracks[@]} )); then
+        mapfile -t matched_tracks < <(find "$music_dir" -type f -iname "*$search_string*")
+        if (( ${#matched_tracks[@]} == 0 )); then
+            echo "No tracks matched"
             continue
+        elif (( ${#matched_tracks[@]} > 10 )); then
+            echo "Too many tracks matched"
+            continue
+        elif (( ${#matched_tracks[@]} > 1 )); then
+            echo "Multiple tracks matched: choose the correct track below:"
+            for i in "${!matched_tracks[@]}"; do
+                echo "$i : ${matched_tracks[$i]}"
+            done
+            read -rp "Index: " index
+            echo >&2
+            if [[ -z "$index" || "$index" =~ [^0-9] ]] || (( index >= ${#matched_tracks[@]} )); then
+                continue
+            fi
+            track=${matched_tracks[$index]}
+        else
+            track=${matched_tracks[0]}
         fi
-        track=${tracks[$index]}
-    else
-        track=${tracks[0]}
     fi
     track_w=$(wslpath -w "$track")
     case "${ffprobe:?}" in
@@ -449,17 +484,17 @@ while true; do
     esac
 
     fmt="default=noprint_wrappers=1:nokey=1"
-    ffprobe_opts=( -v error -select_streams a -show_entries stream=duration -of "$fmt" "$ffprobe_track" )
+    ffprobe_opts=( -v error -select_streams a -show_entries "stream=duration" -of "$fmt" "$ffprobe_track" )
     track_duration=$("${ffprobe:?}" "${ffprobe_opts[@]}" | sed 's/\r//g')
     track_duration_int=$(grep -Eo "^[0-9]*" <<< "$track_duration")
     echo
     if [[ -z "$search_string" ]]; then
         if ! random_timestamps; then
-            errr "Something went wrong with random timestamps"
+            warn "Something went wrong with random timestamps"
         fi
     else
         if ! user_timestamps; then
-            errr "Something went wrong with user timestamps"
+            warn "Something went wrong with user timestamps"
         fi
     fi
 
@@ -494,10 +529,18 @@ while true; do
             echo >&2
         done
         case "$program_selection" in
-            A|B|X|a|b|x)
-                play_clip ;;
+            A|a)
+                play_clip "$lossless_clip" ;;
+            B|b)
+                play_clip "$lossy_clip" ;;
+            X|x)
+                play_clip "$x_clip" ;;
             N|n)
                 if [[ -z "$no_skip" ]]; then
+                    guesses+=( "Skipped" )
+                    results+=( "Skipped" )
+                    trackinfo="$artist - $album - $title"
+                    tracks_seen+=( "$trackinfo" )
                     skipped=$(( skipped + 1 ))
                     break
                 fi
@@ -508,22 +551,26 @@ while true; do
         if [[ "$program_selection" =~ [Xx] ]]; then
             forfeit=false
             no_skip=true
-            while true; do
-                while ! retry_guess_forfeit=$(user_selection "Guess (G), Retry (R), or forfeit (F): " G g R r F f); do
-                    warn "Invalid selection: '$retry_guess_forfeit'"
-                    echo >&2
-                done
-                if [[ "$retry_guess_forfeit" =~ [Gg] ]]; then
-                    break
-                elif [[ "$retry_guess_forfeit" =~ [Rr] ]]; then
-                    continue 2
-                elif [[ "$retry_guess_forfeit" =~ [Ff] ]]; then
-                    incorrect=$(( incorrect + 1 ))
-                    forfeit=true
-                    echo "You forfeited. The file was ${format^^}"
-                    break 2
-                fi
+            while ! retry_guess_forfeit=$(user_selection "Guess (G), Retry (R), or forfeit (F): " G g R r F f); do
+                warn "Invalid selection: '$retry_guess_forfeit'"
+                echo >&2
             done
+            if [[ "$retry_guess_forfeit" =~ [Rr] ]]; then
+                continue
+            elif [[ "$retry_guess_forfeit" =~ [Ff] ]]; then
+                incorrect=$(( incorrect + 1 ))
+                forfeit=true
+                echo "You forfeited. The file was ${format^^}"
+                guesses+=( "Forfeit" )
+                trackinfo="$artist - $album - $title"
+                tracks_seen+=( "$trackinfo" )
+                if [[ "$format" == lossless ]]; then
+                    results+=( "Lossless" )
+                else
+                    results+=( "Lossy" )
+                fi
+                break
+            fi
             if ! "$forfeit"; then
                 unset confirmation
                 while ! [[ "$confirmation" =~ [Yy] ]]; do
@@ -539,12 +586,24 @@ while true; do
                     done
                 done
                 echo
+                trackinfo="$artist - $album - $title"
+                tracks_seen+=( "$trackinfo" )
+                if [[ "$guess" == 1 ]]; then
+                    guesses+=( "Lossless" )
+                else
+                    guesses+=( "Lossy" )
+                fi
+                if [[ "$format" == lossless ]]; then
+                    results+=( "Lossless" )
+                else
+                    results+=( "Lossy" )
+                fi
                 if [[ "$guess" == 1 && "$format" == lossless ]] || [[ "$guess" == 2 && "$format" == lossy ]]; then
                     correct=$(( correct + 1 ))
-                    echo "You guessed correctly! The file was ${format^^}"
+                    echo "${GREEN}CORRECT!$NOCOLOR The file was ${format^^}"
                 else
                     incorrect=$(( incorrect + 1 ))
-                    echo "You guessed incorrectly. The file was ${format^^}"
+                    echo "${RED}INCORRECT.$NOCOLOR The file was ${format^^}"
                 fi
             fi
             accuracy=$(bc <<< "100 * $correct / ($correct + $incorrect)")
@@ -559,11 +618,12 @@ while true; do
             warn "Invalid program selection '$program_selection'"
         done
         case "$program_selection" in
-            A|B|a|b)
-                play_clip ;;
+            A|a)
+                play_clip "$lossless_clip" ;;
+            B|b)
+                play_clip "$lossy_clip" ;;
             *)
                 continue ;;
         esac
     done
-    rm "$lossless_clip" "$lossy_clip"
 done
