@@ -352,17 +352,8 @@ print_results() {
     echo "Current bitrate: ${bitrate}bps"
     {
         echo "Number|File|Result|Guess"
-        for (( i=0; i < ${#guesses[@]}; i++ )); do
-            local guess=${guesses[$i]}
-            local result=${results[$i]}
-            if [[ "$guess" == "$result" && "${result^^}" != "SKIPPED" ]]; then
-                color=$GREEN
-            elif [[ "${result^^}" == "SKIPPED" ]]; then
-                color=$YELLOW
-            else
-                color=$RED
-            fi
-            echo "$(( i + 1 ))|${tracks_seen[$i]}|$result|$color$guess$NOCOLOR"
+        for result in "${results[@]}"; do
+            echo "$result"
         done
     } | column -ts '|'
     echo "$accuracy% accuracy, $correct correct out of $(( correct + incorrect )) tries, $skipped skipped"
@@ -524,11 +515,11 @@ while true; do
                 play_clip "$x_clip" ;;
             N|n)
                 if [[ -z "$no_skip" ]]; then
-                    guesses+=( "Skipped" )
-                    results+=( "Skipped" )
                     trackinfo="$artist - $album - $title"
-                    tracks_seen+=( "$trackinfo" )
                     skipped=$(( skipped + 1 ))
+
+                    result="$(( ${#results[@]} + 1 ))|$trackinfo|Skipped|${YELLOW}Skipped$NOCOLOR"
+                    results+=( "$result" )
                     break
                 fi
                 ;;
@@ -548,14 +539,9 @@ while true; do
                 forfeit=true
                 echo
                 echo "You forfeited. The file was ${format^^}"
-                guesses+=( "Forfeit" )
                 trackinfo="$artist - $album - $title"
-                tracks_seen+=( "$trackinfo" )
-                if [[ "$format" == lossless ]]; then
-                    results+=( "Lossless" )
-                else
-                    results+=( "Lossy" )
-                fi
+                result="$(( ${#results[@]} + 1 ))|$trackinfo|${format^}|${RED}Forfeit$NOCOLOR"
+                results+=( "$result" )
                 break
             fi
             if ! "$forfeit"; then
@@ -571,26 +557,23 @@ while true; do
                     done
                 done
                 trackinfo="$artist - $album - $title"
-                tracks_seen+=( "$trackinfo" )
                 if [[ "$guess" == 1 ]]; then
-                    guesses+=( "Lossless" )
+                    guess_fmt=Lossless
                 else
-                    guesses+=( "Lossy" )
+                    guess_fmt=Lossy
                 fi
-                if [[ "$format" == lossless ]]; then
-                    results+=( "Lossless" )
-                else
-                    results+=( "Lossy" )
-                fi
-
                 echo
                 if [[ "$guess" == 1 && "$format" == lossless ]] || [[ "$guess" == 2 && "$format" == lossy ]]; then
                     correct=$(( correct + 1 ))
                     echo "${GREEN}CORRECT!$NOCOLOR The file was ${format^^}"
+                    color=$GREEN
                 else
                     incorrect=$(( incorrect + 1 ))
                     echo "${RED}INCORRECT.$NOCOLOR The file was ${format^^}"
+                    color=$RED
                 fi
+                result="$(( ${#results[@]} + 1 ))|$trackinfo|${format^}|$color$guess_fmt$NOCOLOR"
+                results+=( "$result" )
             fi
             accuracy=$(bc <<< "100 * $correct / ($correct + $incorrect)")
             echo "Your accuracy is now $accuracy% ($correct/$(( correct + incorrect )))"
