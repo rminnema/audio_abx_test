@@ -8,6 +8,7 @@ readonly NOCOLOR=$'\E[0m'
 errr() { echo "${RED}ERROR:${NOCOLOR} $*" >&2; exit 1; }
 warn() { echo "${YELLOW}WARNING:${NOCOLOR} $*" >&2; }
 
+# Prompts the user for input and validates against provided options
 user_selection() {
     local prompt=$1
     shift
@@ -24,8 +25,10 @@ user_selection() {
     return 1
 }
 
+# Convert a time specification like hours:minutes:seconds, minutes:seconds, or just seconds.
+# Also allow for fractional seconds through decimals on the seconds or my giving time in ms or us
 parse_timespec_to_seconds() {
-    timespec=$1
+    local timespec=$1
 
     if ! grep -Eq -- "^(([0-9]{1,2}:){0,2}[0-9]{1,2}(\.[0-9]+)?|[0-9]+(\.[0-9]+)?((u|m)?s)?)$" <<< "$timespec"; then
         warn "Invalid timespec '$timespec'!"
@@ -56,19 +59,21 @@ parse_timespec_to_seconds() {
     echo "$seconds"
 }
 
+# Play the clip in VLC media player
 play_clip() {
+    local vlc_clip
     if [[ "${vlc:?}" == *vlc.exe ]]; then
-        local vlc_clip
         vlc_clip=$(wslpath -w "$1")
     else
-        local vlc_clip=$1
+        vlc_clip=$1
     fi
 
     "${vlc:?}" "$vlc_clip" &>/dev/null || errr "VLC could not play the clip"
 }
 
+# Provide the user with main options and take actions accordingly
 select_program() {
-    count=0
+    local count=0
     local options=()
     numbered_option "(A) A test (original quality)" && options+=( "A" )
     numbered_option "(B) B test (${bitrate::-1} kbps lossy)" && options+=( "B" )
@@ -155,11 +160,14 @@ select_program() {
     esac
 }
 
+# Print an incrementing list
 numbered_option() {
     count=$(( count + 1 ))
     printf "%s. %s\n" "$count" "$*"
 }
 
+# Create a lossless clip and a lossy clip from a given track at the given timestamps
+# Obfuscate both lossless and lossy clips as .wav so it cannot easily be determined which is the X file
 create_clip() {
     case "${ffmpeg:?}" in
         *.exe)
@@ -184,9 +192,10 @@ create_clip() {
     "${ffmpeg:?}" -loglevel error -y -i "$tmp_mp3" "$ffmpeg_lossy_clip"
 }
 
+# Generate random timestamps to use for clipping
 random_timestamps() {
     clip_duration=30
-    if (( track_duration_int < clip_duration + 30 )); then
+    if (( track_duration_int < clip_duration)); then
         return 1
     fi
     startsec=$(shuf -i 0-"$(( track_duration_int - clip_duration ))" -n 1 --random-source=/dev/urandom)
@@ -194,6 +203,7 @@ random_timestamps() {
     sanitize_timestamps
 }
 
+# Prompt the user for timestamps to use for clipping
 user_timestamps() {
     while true; do
         read -rp "Start timestamp: " startts
@@ -208,24 +218,31 @@ user_timestamps() {
     sanitize_timestamps
 }
 
+# Trap function to run on exit, dispalying the results and deleting all files used
 show_results_and_cleanup() {
     print_results
     rm -f "${lossless_clips[@]}" "${lossy_clips[@]}" "$x_clip"
 }
 
+# Ensure that timestamps are valid
 sanitize_timestamps() {
+    # Ensure no negative start or end times
     if (( $(bc <<< "$startsec < 0") )); then
         startsec=0
     fi
-    if (( $(bc <<< "$endsec < 0") )); then
+    if (( $(bc <<< "$endsec <= 0") )); then
         endsec=1
     fi
+
+    # Ensure the clip doesn't start or extend past the end of the track
     if (( $(bc <<< "$startsec >= $track_duration") )); then
         startsec=$(( track_duration_int - 1 ))
     fi
     if (( $(bc <<< "$endsec > $track_duration") )); then
         endsec=$(( track_duration_int ))
     fi
+
+    # Ensure the start is before the end
     if (( $(bc <<< "$endsec < $startsec") )); then
         local tmpvar=$startsec
         startsec=$endsec
@@ -237,11 +254,12 @@ sanitize_timestamps() {
     clip_duration=$(bc <<< "$endsec - $startsec")
 }
 
+# Choose the MP3 bitrate for the lossy clip
 select_bitrate() {
     count=0
     for btrt in 320 256 128 112 96 64 32; do
         if [[ "$bitrate" && "$btrt" == "${bitrate::-1}" ]]; then
-            numbered_option "$GREEN$btrt kbps$NOCOLOR"
+            numbered_option "${GREEN}${btrt} kbps${NOCOLOR}"
         else
             numbered_option "$btrt kbps"
         fi
@@ -295,6 +313,8 @@ select_bitrate() {
     fi
 }
 
+# Save either the lossy or lossless clip with a user-friendly name to the clips_dir
+# Optional lossless compression to FLAC
 save_clip() {
     local save_choice_1
     while ! save_choice_1=$(user_selection "1 to save lossless, 2 for lossy: " 1 2); do
@@ -343,6 +363,8 @@ save_clip() {
     echo
 }
 
+# Generate a printout of the results, showing all tracks that have been presented so far
+# Along with the results and guesses for each X test
 print_results() {
     echo
     echo "Current bitrate: ${bitrate}bps"
@@ -356,8 +378,8 @@ print_results() {
     echo
 }
 
-if [[ -f lossy_abx.cfg ]]; then
-    source lossy_abx.cfg
+if [[ -f "$HOME/lossy_abx.cfg" ]]; then
+    source "$HOME/lossy_abx.cfg"
 fi
 
 while (( $# > 0 )); do
@@ -514,7 +536,7 @@ while true; do
                     trackinfo="$artist - $album - $title"
                     skipped=$(( skipped + 1 ))
 
-                    result="$(( ${#results[@]} + 1 ))|$trackinfo|Skipped|${YELLOW}Skipped$NOCOLOR"
+                    result="$(( ${#results[@]} + 1 ))|$trackinfo|Skipped|${YELLOW}Skipped${NOCOLOR}"
                     results+=( "$result" )
                     break
                 fi
@@ -536,7 +558,7 @@ while true; do
                 echo
                 echo "You forfeited. The file was ${format^^}"
                 trackinfo="$artist - $album - $title"
-                result="$(( ${#results[@]} + 1 ))|$trackinfo|${format^}|${RED}Forfeit$NOCOLOR"
+                result="$(( ${#results[@]} + 1 ))|$trackinfo|${format^}|${RED}Forfeit${NOCOLOR}"
                 results+=( "$result" )
                 break
             fi
@@ -568,7 +590,7 @@ while true; do
                     echo "${RED}INCORRECT.$NOCOLOR The file was ${format^^}"
                     color=$RED
                 fi
-                result="$(( ${#results[@]} + 1 ))|$trackinfo|${format^}|$color$guess_fmt$NOCOLOR"
+                result="$(( ${#results[@]} + 1 ))|$trackinfo|${format^}|${color}${guess_fmt}${NOCOLOR}"
                 results+=( "$result" )
             fi
             accuracy=$(bc <<< "100 * $correct / ($correct + $incorrect)")
