@@ -349,9 +349,6 @@ save_clip() {
 
 print_results() {
     echo
-    if (( ${#guesses[@]} != ${#results[@]} || ${#results[@]} != ${#tracks_seen[@]} )); then
-        errr "You did something wrong."
-    fi
     echo "Current bitrate: ${bitrate}bps"
     {
         echo "Number|File|Result|Guess"
