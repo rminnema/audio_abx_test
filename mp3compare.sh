@@ -87,6 +87,7 @@ select_program() {
     while ! program_selection=$(user_selection "Selection: " $(seq $count) "${options[@]^^}" "${options[@],,}"); do
         return 1
     done
+    echo
     if [[ "$program_selection" =~ ^[0-9]+$ ]]; then
         program_selection=${options[$(( program_selection - 1 ))]}
     fi
@@ -114,7 +115,6 @@ select_program() {
             print_results
             ;;
         C|c)
-            warn "Resetting score"
             select_bitrate
             create_clip
             select_program
@@ -149,7 +149,7 @@ select_program() {
                     return 0
                 fi
             fi
-            echo "${startsec}s - ${endsec}s"
+            echo "$(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)"
             create_clip
             ;;
         *)
@@ -159,7 +159,7 @@ select_program() {
 
 numbered_option() {
     count=$(( count + 1 ))
-    echo "$count. $*"
+    printf "%s. %s\n" "$count" "$*"
 }
 
 create_clip() {
@@ -241,21 +241,18 @@ sanitize_timestamps() {
 
 select_bitrate() {
     count=0
-    accuracy=0
-    correct=0
-    incorrect=0
-    skipped=0
-    tracks_seen=()
-    guesses=()
-    results=()
     for btrt in 320 256 128 96 64 32; do
-        numbered_option "$btrt kbps"
+        if [[ "$bitrate" && "$btrt" == "${bitrate::-1}" ]]; then
+            numbered_option "$GREEN$btrt kbps$NOCOLOR"
+        else
+            numbered_option "$btrt kbps"
+        fi
     done
     numbered_option "Custom"
-    numbered_option "Quit"
     while ! bitrate_selection=$(user_selection "Selection: " $(seq "$count")); do
         warn "Invalid selection: '$bitrate_selection'"
     done
+    last_bitrate=$bitrate
     case "$bitrate_selection" in
         1)
             bitrate=320k ;;
@@ -284,11 +281,20 @@ select_bitrate() {
             fi
             echo "Bitrate selection is $bitrate"
             ;;
-        8)
-            exit 0 ;;
         *)
-            errr "Input must be between 1 and 8" ;;
+            errr "Input must be between 1 and $count" ;;
     esac
+    echo
+    if [[ "$last_bitrate" && "$bitrate" != "$last_bitrate" ]]; then
+        warn "Resetting score"
+        accuracy=0
+        correct=0
+        incorrect=0
+        skipped=0
+        tracks_seen=()
+        guesses=()
+        results=()
+    fi
 }
 
 save_clip() {
@@ -359,6 +365,7 @@ print_results() {
         done
     } | column -ts '|'
     echo "$accuracy% accuracy, $correct correct out of $(( correct + incorrect )) tries, $skipped skipped"
+    echo
 }
 
 if [[ -f mp3compare.cfg ]]; then
@@ -407,10 +414,12 @@ trap show_results_and_cleanup EXIT
 while ! random=$(user_selection "Fully random song and timestamp selection (y/n): " Y y N n); do
     echo "Invalid selection: '$random'"
 done
+echo
 
 while ! source_quality=$(user_selection "Source quality (L for lossless, M for mixed lossy/lossless): " L l M m); do
     echo "Invalid selection: '$source_quality'"
 done
+echo
 
 if [[ "$source_quality" =~ [Ll] ]]; then
     mapfile -t alltracks < <(find "$music_dir" -type f -iname "*.flac")
@@ -483,10 +492,12 @@ while true; do
     esac
     IFS='|' read -r artist album title < <("${mediainfo:?}" --output="General;%Artist%|%Album%|%Title%" "$mediainfo_track")
 
+    echo
     echo "Artist: $artist"
     echo "Album: $album"
     echo "Track: $title"
-    echo "${startsec}s - ${endsec}s"
+    echo "$(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)"
+    echo
 
     lossless_clips+=( "$(mktemp --suffix=.wav)" )
     lossless_clip=${lossless_clips[-1]}
@@ -534,6 +545,7 @@ while true; do
             elif [[ "$retry_guess_forfeit" =~ [Ff] ]]; then
                 incorrect=$(( incorrect + 1 ))
                 forfeit=true
+                echo
                 echo "You forfeited. The file was ${format^^}"
                 guesses+=( "Forfeit" )
                 trackinfo="$artist - $album - $title"
@@ -569,6 +581,8 @@ while true; do
                 else
                     results+=( "Lossy" )
                 fi
+
+                echo
                 if [[ "$guess" == 1 && "$format" == lossless ]] || [[ "$guess" == 2 && "$format" == lossy ]]; then
                     correct=$(( correct + 1 ))
                     echo "${GREEN}CORRECT!$NOCOLOR The file was ${format^^}"
@@ -580,6 +594,7 @@ while true; do
             accuracy=$(bc <<< "100 * $correct / ($correct + $incorrect)")
             echo "Your accuracy is now $accuracy% ($correct/$(( correct + incorrect )))"
             echo "$skipped tracks skipped"
+            echo
             break
         fi
     done
