@@ -285,8 +285,8 @@ select_bitrate() {
             errr "Input must be between 1 and $count" ;;
     esac
     echo
-    if [[ "$last_bitrate" && "$bitrate" != "$last_bitrate" ]]; then
-        warn "Resetting score"
+    if [[ -z "$last_bitrate" || "$bitrate" != "$last_bitrate" ]]; then
+        [[ "$last_bitrate" ]] && warn "Resetting score"
         accuracy=0
         correct=0
         incorrect=0
@@ -342,15 +342,17 @@ save_clip() {
             warn "Could not save $save_file"
         fi
     fi
+    echo
 }
 
 print_results() {
+    echo
     if (( ${#guesses[@]} != ${#results[@]} || ${#results[@]} != ${#tracks_seen[@]} )); then
         errr "You did something wrong."
     fi
+    echo "Current bitrate: ${bitrate}bps"
     {
-        echo "Current bitrate: ${bitrate}bps"
-        echo "File|Result|Guess"
+        echo "Number|File|Result|Guess"
         for (( i=0; i < ${#guesses[@]}; i++ )); do
             local guess=${guesses[$i]}
             local result=${results[$i]}
@@ -361,7 +363,7 @@ print_results() {
             else
                 color=$RED
             fi
-            echo "${tracks_seen[$i]}|$result|$color$guess$NOCOLOR"
+            echo "$(( i + 1 ))|${tracks_seen[$i]}|$result|$color$guess$NOCOLOR"
         done
     } | column -ts '|'
     echo "$accuracy% accuracy, $correct correct out of $(( correct + incorrect )) tries, $skipped skipped"
@@ -492,13 +494,6 @@ while true; do
     esac
     IFS='|' read -r artist album title < <("${mediainfo:?}" --output="General;%Artist%|%Album%|%Title%" "$mediainfo_track")
 
-    echo
-    echo "Artist: $artist"
-    echo "Album: $album"
-    echo "Track: $title"
-    echo "$(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)"
-    echo
-
     lossless_clips+=( "$(mktemp --suffix=.wav)" )
     lossless_clip=${lossless_clips[-1]}
     lossless_clip_w=$(wslpath -w "$lossless_clip")
@@ -511,6 +506,12 @@ while true; do
     randombit=$(( RANDOM%2 ))
     no_skip=''
     while true; do
+        echo "Clip information"
+        echo "Artist: $artist"
+        echo "Album: $album"
+        echo "Title: $title"
+        echo "$(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)"
+        echo
         while ! select_program ${no_skip:+no_skip}; do
             warn "Invalid selection '$program_selection'"
         done
