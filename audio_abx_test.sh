@@ -68,6 +68,11 @@ play_clip() {
         vlc_clip=$1
     fi
 
+    if kill -0 $! 2>/dev/null; then
+        echo "Please wait while clip creation finishes."
+        echo
+    fi
+    wait $!
     "${vlc:?}" "$vlc_clip" &>/dev/null || errr "VLC could not play the clip"
 }
 
@@ -123,7 +128,7 @@ select_program() {
             ;;
         C|c)
             select_bitrate
-            create_clip
+            create_clip &
             select_program
             return 0
             ;;
@@ -155,7 +160,7 @@ select_program() {
                     return 0
                 fi
             fi
-            create_clip
+            create_clip &
             ;;
         *)
             return 1 ;;
@@ -223,6 +228,11 @@ user_timestamps() {
 # Trap function to run on exit, dispalying the results and deleting all files used
 show_results_and_cleanup() {
     print_results
+    if kill -0 $! 2>/dev/null; then
+        echo "Please wait while clip creation finishes."
+        echo
+    fi
+    wait $!
     rm -f "${lossless_clips[@]}" "${lossy_clips[@]}" "$x_clip"
 }
 
@@ -345,6 +355,11 @@ save_clip() {
         save_file="$clips_dir/$save_file_basename -- $compression.$(( ++i )).$file_fmt"
     done
 
+    if kill -0 $! 2>/dev/null; then
+        echo "Please wait while clip creation finishes."
+        echo
+    fi
+    wait $!
     if [[ "$save_choice_2" == 1 ]]; then
         if cp "$clip_to_save" "$save_file"; then
             echo "$compression clip saved to $save_file"
@@ -381,14 +396,17 @@ print_results() {
 }
 
 track_info() {
-    local info="$artist - $album - $title"
+    local info="$artist -- $album -- $title"
     if (( ${#info} > 80 )); then
         info="${info::80}..."
     fi
+    echo "$info"
 }
 
-if [[ -f "$HOME/audio_abx_test.cfg" ]]; then
-    source "$HOME/audio_abx_test.cfg"
+config_file="$HOME/audio_abx_test.cfg"
+if [[ -f "$config_file" ]]; then
+    music_dir=$(awk -F '=' '/^music_dir=/ { print $2 }' "$config_file")
+    clips_dir=$(awk -F '=' '/^clips_dir=/ { print $2 }' "$config_file")
 fi
 
 while (( $# > 0 )); do
@@ -519,7 +537,7 @@ while true; do
     lossy_clip=${lossy_clips[-1]}
     lossy_clip_w=$(wslpath -w "$lossy_clip")
 
-    create_clip
+    create_clip &
 
     randombit=$(( RANDOM%2 ))
     no_skip=''
