@@ -519,9 +519,9 @@ while true; do
     fi
 
     if [[ "${mediainfo:?}" == *mediainfo.exe ]]; then
-        mediainfo_track="$track_w" ;;
+        mediainfo_track="$track_w"
     else
-        mediainfo_track="$track" ;;
+        mediainfo_track="$track"
     fi
     IFS='|' read -r artist album title < <("${mediainfo:?}" --output="General;%Artist%|%Album%|%Title%" "$mediainfo_track")
 
