@@ -380,6 +380,13 @@ print_results() {
     echo
 }
 
+track_info() {
+    local info="$artist - $album - $title"
+    if (( ${#info} > 80 )); then
+        info="${info::80}..."
+    fi
+}
+
 if [[ -f "$HOME/audio_abx_test.cfg" ]]; then
     source "$HOME/audio_abx_test.cfg"
 fi
@@ -535,10 +542,9 @@ while true; do
                 play_clip "$x_clip" ;;
             N|n)
                 if [[ -z "$no_skip" ]]; then
-                    trackinfo="$artist - $album - $title"
                     skipped=$(( skipped + 1 ))
 
-                    result="$(( ${#results[@]} + 1 ))|$trackinfo|Skipped|${YELLOW}Skipped${NOCOLOR}"
+                    result="$(( ${#results[@]} + 1 ))|$(track_info)|Skipped|${YELLOW}Skipped${NOCOLOR}"
                     results+=( "$result" )
                     break
                 fi
@@ -559,24 +565,23 @@ while true; do
                 forfeit=true
                 echo
                 echo "You forfeited. The file was ${format^^}"
-                trackinfo="$artist - $album - $title"
-                result="$(( ${#results[@]} + 1 ))|$trackinfo|${format^}|${RED}Forfeit${NOCOLOR}"
+                result="$(( ${#results[@]} + 1 ))|$(track_info)|${format^}|${RED}Forfeit${NOCOLOR}"
                 results+=( "$result" )
                 break
             fi
             if ! "$forfeit"; then
                 unset confirmation
                 while ! [[ "$confirmation" =~ [Yy] ]]; do
+                    echo
                     echo "Which did you just hear?"
                     while ! guess=$(user_selection "1 for lossless, 2 for lossy: " 1 2); do
                         warn "Invalid selection: '$guess'"
                     done
-                    echo "Your selection: $guess"
+                    echo
                     while ! confirmation=$(user_selection "Are you sure? (y/n): " Y y N n); do
                         warn "Invalid selection: '$confirmation'"
                     done
                 done
-                trackinfo="$artist - $album - $title"
                 if [[ "$guess" == 1 ]]; then
                     guess_fmt=Lossless
                 else
@@ -592,7 +597,7 @@ while true; do
                     echo "${RED}INCORRECT.$NOCOLOR The file was ${format^^}"
                     color=$RED
                 fi
-                result="$(( ${#results[@]} + 1 ))|$trackinfo|${format^}|${color}${guess_fmt}${NOCOLOR}"
+                result="$(( ${#results[@]} + 1 ))|$(track_info)|${format^}|${color}${guess_fmt}${NOCOLOR}"
                 results+=( "$result" )
             fi
             accuracy=$(bc <<< "100 * $correct / ($correct + $incorrect)")
