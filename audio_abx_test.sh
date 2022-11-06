@@ -176,18 +176,15 @@ numbered_option() {
 # Create a lossless clip and a lossy clip from a given track at the given timestamps
 # Obfuscate both lossless and lossy clips as .wav so it cannot easily be determined which is the X file
 create_clip() {
-    case "${ffmpeg:?}" in
-        *.exe)
-            local ffmpeg_track="$track_w"
-            local ffmpeg_lossless_clip="$lossless_clip_w"
-            local ffmpeg_lossy_clip="$lossy_clip_w"
-            ;;
-        *)
-            local ffmpeg_track="$track"
-            local ffmpeg_lossless_clip="$lossless_clip"
-            local ffmpeg_lossy_clip="$lossy_clip"
-            ;;
-    esac
+    if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
+        local ffmpeg_track="$track_w"
+        local ffmpeg_lossless_clip="$lossless_clip_w"
+        local ffmpeg_lossy_clip="$lossy_clip_w"
+    else
+        local ffmpeg_track="$track"
+        local ffmpeg_lossless_clip="$lossless_clip"
+        local ffmpeg_lossy_clip="$lossy_clip"
+    fi
 
     trap 'rm -f "$tmp_mp3"' RETURN
     local tmp_mp3; tmp_mp3=$(mktemp --suffix=.mp3)
@@ -501,12 +498,11 @@ while true; do
         fi
     fi
     track_w=$(wslpath -w "$track")
-    case "${ffprobe:?}" in
-        *ffprobe.exe)
-            ffprobe_track="$track_w" ;;
-        *ffprobe)
-            ffprobe_track="$track" ;;
-    esac
+    if [[ "${ffprobe:?}" == *ffprobe.exe ]]; then
+        ffprobe_track=$track_w
+    else
+        ffprobe_track=$track
+    fi
 
     fmt="default=noprint_wrappers=1:nokey=1"
     ffprobe_opts=( -v error -select_streams a -show_entries "stream=duration" -of "$fmt" "$ffprobe_track" )
@@ -522,12 +518,11 @@ while true; do
         fi
     fi
 
-    case "${mediainfo:?}" in
-        *.exe)
-            mediainfo_track="$track_w" ;;
-        *)
-            mediainfo_track="$track" ;;
-    esac
+    if [[ "${mediainfo:?}" == *mediainfo.exe ]]; then
+        mediainfo_track="$track_w" ;;
+    else
+        mediainfo_track="$track" ;;
+    fi
     IFS='|' read -r artist album title < <("${mediainfo:?}" --output="General;%Artist%|%Album%|%Title%" "$mediainfo_track")
 
     lossless_clips+=( "$(mktemp --suffix=.wav)" )
