@@ -14,7 +14,6 @@ user_selection() {
     local options=( "$@" )
     local selection
     read -rp "$prompt" selection
-    echo >&2
     for option in "${options[@]}"; do
         if [[ "$selection" == "$option" ]]; then
             echo "$selection"
@@ -88,7 +87,6 @@ select_program() {
     while ! program_selection=$(user_selection "Selection: " $(seq $count) "${options[@]^^}" "${options[@],,}"); do
         return 1
     done
-    echo >&2
     if [[ "$program_selection" =~ ^[0-9]+$ ]]; then
         program_selection=${options[$(( program_selection - 1 ))]}
     fi
@@ -142,9 +140,7 @@ select_program() {
         R|r)
             while ! timestamp_selection=$(user_selection "U for user-selected timestamps, R for random: " U u R r); do
                 warn "Invalid selection: '$timestamp_selection'"
-                echo >&2
             done
-            echo
             if [[ "$timestamp_selection" =~ [Uu] ]]; then
                 user_timestamps
             else
@@ -203,13 +199,11 @@ random_timestamps() {
 user_timestamps() {
     while true; do
         read -rp "Start timestamp: " startts
-        echo >&2
         startsec=$(parse_timespec_to_seconds "$startts") && break
     done
 
     while true; do
         read -rp "End timestamp: " endts
-        echo >&2
         endsec=$(parse_timespec_to_seconds "$endts") && break
     done
 
@@ -217,12 +211,6 @@ user_timestamps() {
 }
 
 show_results_and_cleanup() {
-    #if (( correct + incorrect > 0 )); then
-    #    echo "After $(( correct + incorrect )) trials, your accuracy was:"
-    #    echo "$accuracy%"
-    #    echo "$correct tracks guessed correctly"
-    #    echo "$skipped tracks skipped"
-    #fi
     print_results
     rm -f "${lossless_clips[@]}" "${lossy_clips[@]}" "$x_clip"
 }
@@ -267,7 +255,6 @@ select_bitrate() {
     numbered_option "Quit"
     while ! bitrate_selection=$(user_selection "Selection: " $(seq "$count")); do
         warn "Invalid selection: '$bitrate_selection'"
-        echo >&2
     done
     case "$bitrate_selection" in
         1)
@@ -284,7 +271,6 @@ select_bitrate() {
             bitrate=32k ;;
         7)
             read -rn4 -p "Bitrate (between 32k and 320k): " bitrate
-            echo >&2
             if ! [[ "$bitrate" =~ k ]]; then
                 bitrate+=k
             fi
@@ -309,12 +295,10 @@ save_clip() {
     local save_choice_1
     while ! save_choice_1=$(user_selection "1 to save lossless, 2 for lossy: " 1 2); do
         warn "Invalid selection: '$save_choice_1'"
-        echo >&2
     done
     local save_choice_2
     while ! save_choice_2=$(user_selection "1 to save as WAV, 2 as FLAC: " 1 2); do
         warn "Invalid selection: '$save_choice_2'"
-        echo >&2
     done
     i=1
     local save_file_basename && save_file_basename=$(sed 's/\//-/g' <<< "$artist -- $album -- $title")
@@ -374,8 +358,7 @@ print_results() {
             echo "${tracks_seen[$i]}|$result|$color$guess$NOCOLOR"
         done
     } | column -ts '|'
-    echo "$accuracy% accuracy, $correct/$(( correct + incorrect )), $skipped skipped"
-    echo
+    echo "$accuracy% accuracy, $correct correct out of $(( correct + incorrect )) tries, $skipped skipped"
 }
 
 if [[ -f mp3compare.cfg ]]; then
@@ -423,12 +406,10 @@ trap show_results_and_cleanup EXIT
 
 while ! random=$(user_selection "Fully random song and timestamp selection (y/n): " Y y N n); do
     echo "Invalid selection: '$random'"
-    echo >&2
 done
 
 while ! source_quality=$(user_selection "Source quality (L for lossless, M for mixed lossy/lossless): " L l M m); do
     echo "Invalid selection: '$source_quality'"
-    echo >&2
 done
 
 if [[ "$source_quality" =~ [Ll] ]]; then
@@ -444,9 +425,7 @@ fi
 while true; do
     if ! [[ "$random" =~ [Yy] ]]; then
         read -rp "Track search string: " search_string
-        echo >&2
     fi
-    echo
     if [[ -z "$search_string" ]]; then
         echo "Will choose a random track"
         max_idx=$(( ${#alltracks[@]} - 1 ))
@@ -466,7 +445,6 @@ while true; do
                 echo "$i : ${matched_tracks[$i]}"
             done
             read -rp "Index: " index
-            echo >&2
             if [[ -z "$index" || "$index" =~ [^0-9] ]] || (( index >= ${#matched_tracks[@]} )); then
                 continue
             fi
@@ -487,7 +465,6 @@ while true; do
     ffprobe_opts=( -v error -select_streams a -show_entries "stream=duration" -of "$fmt" "$ffprobe_track" )
     track_duration=$("${ffprobe:?}" "${ffprobe_opts[@]}" | sed 's/\r//g')
     track_duration_int=$(grep -Eo "^[0-9]*" <<< "$track_duration")
-    echo
     if [[ -z "$search_string" ]]; then
         if ! random_timestamps; then
             warn "Something went wrong with random timestamps"
@@ -523,10 +500,8 @@ while true; do
     randombit=$(( RANDOM%2 ))
     no_skip=''
     while true; do
-        echo
         while ! select_program ${no_skip:+no_skip}; do
             warn "Invalid selection '$program_selection'"
-            echo >&2
         done
         case "$program_selection" in
             A|a)
@@ -553,7 +528,6 @@ while true; do
             no_skip=true
             while ! retry_guess_forfeit=$(user_selection "Guess (G), Retry (R), or forfeit (F): " G g R r F f); do
                 warn "Invalid selection: '$retry_guess_forfeit'"
-                echo >&2
             done
             if [[ "$retry_guess_forfeit" =~ [Rr] ]]; then
                 continue
@@ -577,15 +551,12 @@ while true; do
                     echo "Which did you just hear?"
                     while ! guess=$(user_selection "1 for lossless, 2 for lossy: " 1 2); do
                         warn "Invalid selection: '$guess'"
-                        echo >&2
                     done
                     echo "Your selection: $guess"
                     while ! confirmation=$(user_selection "Are you sure? (y/n): " Y y N n); do
                         warn "Invalid selection: '$confirmation'"
-                        echo >&2
                     done
                 done
-                echo
                 trackinfo="$artist - $album - $title"
                 tracks_seen+=( "$trackinfo" )
                 if [[ "$guess" == 1 ]]; then
@@ -609,7 +580,6 @@ while true; do
             accuracy=$(bc <<< "100 * $correct / ($correct + $incorrect)")
             echo "Your accuracy is now $accuracy% ($correct/$(( correct + incorrect )))"
             echo "$skipped tracks skipped"
-            echo
             break
         fi
     done
