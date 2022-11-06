@@ -75,6 +75,7 @@ play_clip() {
 select_program() {
     local count=0
     local options=()
+
     numbered_option "(A) A test (original quality)" && options+=( "A" )
     numbered_option "(B) B test (${bitrate::-1} kbps lossy)" && options+=( "B" )
     if ! grep -q "no_x_test" <<< "$*"; then
@@ -89,6 +90,7 @@ select_program() {
     numbered_option "(T) Reset score" && options+=( "T" )
     numbered_option "(S) Save clip" && options+=( "S" )
     numbered_option "(Q) Quit" && options+=( "Q" )
+
     while ! program_selection=$(user_selection "Selection: " $(seq $count) "${options[@]^^}" "${options[@],,}"); do
         return 1
     done
@@ -378,8 +380,8 @@ print_results() {
     echo
 }
 
-if [[ -f "$HOME/lossy_abx.cfg" ]]; then
-    source "$HOME/lossy_abx.cfg"
+if [[ -f "$HOME/audio_abx_test.cfg" ]]; then
+    source "$HOME/audio_abx_test.cfg"
 fi
 
 while (( $# > 0 )); do
