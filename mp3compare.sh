@@ -85,18 +85,19 @@ play_clip() {
 select_program() {
     count=1
     local options=()
-    numbered "(A) A test (original quality)" && options+=( "A" )
-    numbered "(B) B test (${bitrate::-1} kbps lossy)" && options+=( "B" )
+    numbered_option "(A) A test (original quality)" && options+=( "A" )
+    numbered_option "(B) B test (${bitrate::-1} kbps lossy)" && options+=( "B" )
     if ! grep -q "no_x_test" <<< "$*"; then
-        numbered "(X) X test (unknown)" && options+=( "X" )
+        numbered_option "(X) X test (unknown)" && options+=( "X" )
     fi
-    numbered "(R) Re-clip track" && options+=( "R" )
+    numbered_option "(R) Re-clip track" && options+=( "R" )
     if ! grep -q "no_skip" <<< "$*"; then
-        numbered "(N) Next track" && options+=( "N" )
+        numbered_option "(N) Next track" && options+=( "N" )
     fi
-    numbered "(C) Change bitrate" && options+=( "C" )
-    numbered "(S) Save clip" && options+=( "S" )
-    numbered "(Q) Quit" && options+=( "Q" )
+    numbered_option "(C) Change bitrate" && options+=( "C" )
+    numbered_option "(T) Reset score" && options+=( "T" )
+    numbered_option "(S) Save clip" && options+=( "S" )
+    numbered_option "(Q) Quit" && options+=( "Q" )
     while ! program_selection=$(user_selection "Selection: " $(seq $count) "${options[@]^^}" "${options[@],,}"); do
         return 1
     done
@@ -168,6 +169,14 @@ select_program() {
             select_program
             return 0
             ;;
+        T|t)
+            warn "Resetting score"
+            correct=0
+            incorrect=0
+            skipped=0
+            accuracy=0
+            return 0
+            ;;
         N|n)
             return 0
             ;;
@@ -195,7 +204,7 @@ select_program() {
     esac
 }
 
-numbered() {
+numbered_option() {
     echo "$count. $*"
     count=$(( count + 1 ))
 }
@@ -255,6 +264,7 @@ show_results_and_cleanup() {
         echo "After $(( correct + incorrect )) trials, your accuracy was:"
         echo "$accuracy%"
         echo "$correct tracks guessed correctly"
+        echo "$skipped tracks skipped"
     fi
     rm -f "${lossless_clips[@]}" "${lossy_clips[@]}" "${x_clips[@]}"
 }
@@ -288,11 +298,12 @@ select_bitrate() {
     accuracy=0
     correct=0
     incorrect=0
+    skipped=0
     for btrt in 320 256 128 96 64 32; do
-        numbered "$btrt kbps"
+        numbered_option "$btrt kbps"
     done
-    numbered "Custom"
-    numbered "Quit"
+    numbered_option "Custom"
+    numbered_option "Quit"
     while ! bitrate_selection=$(user_selection "Selection: " $(seq "$count")); do
         warn "Invalid selection: '$bitrate_selection'"
         echo >&2
@@ -371,12 +382,9 @@ done
 
 lossless_clips=()
 lossy_clips=()
-correct=0
-incorrect=0
-accuracy=0
-trap show_results_and_cleanup EXIT
 
 select_bitrate
+trap show_results_and_cleanup EXIT
 
 while ! random=$(user_selection "Fully random (y/n): " Y y N n); do
     echo "Invalid selection: '$random'"
@@ -481,7 +489,7 @@ while true; do
     no_skip=''
     while true; do
         echo
-        while ! select_program "${no_skip:+no_skip}"; do
+        while ! select_program ${no_skip:+no_skip}; do
             warn "Invalid selection '$program_selection'"
             echo >&2
         done
@@ -489,7 +497,11 @@ while true; do
             A|B|X|a|b|x)
                 play_clip ;;
             N|n)
-                [[ "$no_skip" ]] || break ;;
+                if [[ -z "$no_skip" ]]; then
+                    skipped=$(( skipped + 1 ))
+                    break
+                fi
+                ;;
             *)
                 continue ;;
         esac
@@ -537,6 +549,7 @@ while true; do
             fi
             accuracy=$(bc <<< "100 * $correct / ($correct + $incorrect)")
             echo "Your accuracy is now $accuracy% ($correct/$(( correct + incorrect )))"
+            echo "$skipped tracks skipped"
             echo
             break
         fi
