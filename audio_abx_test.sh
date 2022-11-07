@@ -28,7 +28,7 @@ user_selection() {
 }
 
 # Convert a time specification like hours:minutes:seconds, minutes:seconds, or just seconds.
-# Also allow for fractional seconds through decimals on the seconds or my giving time in ms or us
+# Also allow for fractional seconds through decimals on the seconds or by giving time in ms or us
 parse_timespec_to_seconds() {
     local timespec=$1
 
