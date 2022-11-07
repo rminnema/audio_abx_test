@@ -374,8 +374,8 @@ save_clip() {
     echo
     if [[ "$save_choice_2" == 1 ]]; then
         if cp "$clip_to_save" "$save_file"; then
-            info "${compression^} clip saved to: "
-            echo "$save_file" >&2
+            echo "${compression^} clip saved to:"
+            echo "$save_file"
         else
             warn "Could not save $save_file"
         fi
@@ -385,8 +385,8 @@ save_clip() {
             save_file=$(wslpath -w "$save_file")
         fi
         if "${ffmpeg:?}" -y -loglevel error -i "$clip_to_save" "$save_file"; then
-            info "${compression^} clip saved to: "
-            echo "$save_file" >&2
+            echo "${compression^} clip saved to:"
+            echo "$save_file"
         else
             warn "Could not save $save_file"
         fi
