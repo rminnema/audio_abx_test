@@ -100,6 +100,7 @@ select_program() {
     while ! program_selection=$(user_selection "Selection: " $(seq $count) "${options[@]^^}" "${options[@],,}"); do
         return 1
     done
+    echo >&2
     if [[ "$program_selection" =~ ^[0-9]+$ ]]; then
         program_selection=${options[$(( program_selection - 1 ))]}
     fi
@@ -128,6 +129,7 @@ select_program() {
             select_bitrate
             create_clip &
             create_clip_pid=$!
+            print_clip_info
             select_program
             return 0
             ;;
@@ -149,6 +151,7 @@ select_program() {
             while ! timestamp_selection=$(user_selection "U for user-selected timestamps, R for random: " U u R r); do
                 warn "Invalid selection: '$timestamp_selection'"
             done
+            echo >&2
             if [[ "$timestamp_selection" =~ [Uu] ]]; then
                 user_timestamps
             else
@@ -213,14 +216,23 @@ random_timestamps() {
 
 # Prompt the user for timestamps to use for clipping
 user_timestamps() {
-    while true; do
+    unset startsec endsec
+    while [[ -z "$startsec" ]]; do
         read -rp "Start timestamp: " startts
-        startsec=$(parse_timespec_to_seconds "$startts") && break
+        if [[ -z "$startts" || "$startts" =~ ^[Rr]$ ]]; then
+            info "Selecting random timestamp for a 30 second clip"
+            clip_duration=30
+            track_duration_int=${durations_map["$track"]}
+            startsec=$(shuf -i 0-"$(( track_duration_int - clip_duration ))" -n 1 --random-source=/dev/urandom)
+            endsec=$(( startsec + clip_duration ))
+        elif [[ "$startts" =~ ^[0-9]+$ ]]; then
+            startsec=$(parse_timespec_to_seconds "$startts")
+        fi
     done
 
-    while true; do
+    while [[ -z "$endsec" ]]; do
         read -rp "End timestamp: " endts
-        endsec=$(parse_timespec_to_seconds "$endts") && break
+        endsec=$(parse_timespec_to_seconds "$endts")
     done
 
     sanitize_timestamps
@@ -335,7 +347,6 @@ select_bitrate() {
 # Save either the lossy or lossless clip with a user-friendly name to the clips_dir
 # Optional lossless compression to FLAC
 save_clip() {
-    echo
     local save_choice_1
     while ! save_choice_1=$(user_selection "1 to save lossless, 2 for lossy: " 1 2); do
         warn "Invalid selection: '$save_choice_1'"
@@ -344,7 +355,6 @@ save_clip() {
     while ! save_choice_2=$(user_selection "1 to save as WAV, 2 as FLAC: " 1 2); do
         warn "Invalid selection: '$save_choice_2'"
     done
-    i=1
     local artist=${artists_map["$track"]}
     local album=${albums_map["$track"]}
     local title=${titles_map["$track"]}
@@ -361,10 +371,9 @@ save_clip() {
     else
         local file_fmt=flac
     fi
-    local save_file="$clips_dir/$save_file_basename -- $compression.$i.$file_fmt"
-    while [[ -f "$save_file" ]]; do
-        save_file="$clips_dir/$save_file_basename -- $compression.$(( ++i )).$file_fmt"
-    done
+    start_ts=$(date -u --date=@"$startsec" +%H%M%S | sed -r 's/00([0-9]{4})/\1/g')
+    end_ts=$(date -u --date=@"$endsec" +%H%M%S | sed -r 's/00([0-9]{4})/\1/g')
+    local save_file="$clips_dir/$save_file_basename -- $compression.$start_ts.$end_ts.$file_fmt"
 
     if kill -0 $! 2>/dev/null; then
         echo
@@ -391,12 +400,12 @@ save_clip() {
             warn "Could not save $save_file"
         fi
     fi
+    echo
 }
 
 # Generate a printout of the results, showing all tracks that have been presented so far
 # Along with the results and guesses for each X test
 print_results() {
-    echo
     echo "Current bitrate: ${bitrate}bps"
     {
         echo "Number|File|Result|Guess"
@@ -427,9 +436,9 @@ generate_track_details() {
     else
         local mediainfo_track=$1
     fi
-    local mediainfo_output='General;%Artist%|%Album%|%Title%'
-    local t_artist t_album t_title
-    IFS='|' read -r t_artist t_album t_title < <("${mediainfo:?}" --output="$mediainfo_output" "$mediainfo_track")
+    local mediainfo_output='General;%Artist%|%Album%|%Title%|%BitRate%|%Format%'
+    local t_artist t_album t_title t_bitrate t_format
+    IFS='|' read -r t_artist t_album t_title t_bitrate t_format < <("${mediainfo:?}" --output="$mediainfo_output" "$mediainfo_track")
     local track_details="$t_artist -- $t_album -- $t_title"
     if (( ${#track_details} > 90 )); then
         track_details="${track_details::90}..."
@@ -438,6 +447,8 @@ generate_track_details() {
     artists_map["$track"]=$t_artist
     albums_map["$track"]=$t_album
     titles_map["$track"]=$t_title
+    bitrate_map["$track"]=$(( t_bitrate / 1024 ))
+    format_map["$track"]=$t_format
 }
 
 print_clip_info() {
@@ -445,6 +456,8 @@ print_clip_info() {
     echo "Artist: ${artists_map["$track"]}"
     echo "Album: ${albums_map["$track"]}"
     echo "Title: ${titles_map["$track"]}"
+    echo "Avg. Bitrate: ${bitrate_map["$track"]} kbps"
+    echo "Format: ${format_map["$track"]}"
     echo "$(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)"
     echo
 }
@@ -504,28 +517,29 @@ done
 #echo
 
 if [[ "$source_quality" =~ [Ll] ]]; then
-    mapfile -t alltracks < <(find "$music_dir" -type f -iname "*.flac")
+    mapfile -t all_tracks < <(find "$music_dir" -type f -iname "*.flac")
 else
-    mapfile -t alltracks < <(find "$music_dir" -type f -a \( -iname "*.flac" -o -iname "*.m4a" -o -iname "*.mp3" \))
+    mapfile -t all_tracks < <(find "$music_dir" -type f -a \( -iname "*.flac" -o -iname "*.m4a" -o -iname "*.mp3" \))
 fi
 
-if (( ${#alltracks[@]} == 0 )); then
+if (( ${#all_tracks[@]} == 0 )); then
     errr "No tracks were found in '$music_dir'"
 fi
 
-declare -A track_details_map artists_map albums_map titles_map durations_map
+declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
 while true; do
+    echo
     if ! [[ "$random" =~ [Yy] ]]; then
         read -rp "Track search string: " search_string
     fi
     if [[ -z "$search_string" ]]; then
         info "Will choose a random track"
-        max_idx=$(( ${#alltracks[@]} - 1 ))
+        max_idx=$(( ${#all_tracks[@]} - 1 ))
         rand_idx=$(shuf -i 0-"$max_idx" -n 1 --random-source=/dev/urandom)
-        track="${alltracks[$rand_idx]}"
+        track="${all_tracks[$rand_idx]}"
         generate_track_details "$track"
     else
-        mapfile -t matched_tracks < <(find "${alltracks[@]}" -maxdepth 0 -iregex ".*$search_string.*" -regextype egrep)
+        mapfile -t matched_tracks < <(IFS=$'\n'; grep -Ei "[^/]*$search_string[^/]*$" <<< "${all_tracks[*]}")
         if (( ${#matched_tracks[@]} == 0 )); then
             info "No tracks matched"
             continue
@@ -533,7 +547,7 @@ while true; do
             info "Too many tracks matched"
             continue
         elif (( ${#matched_tracks[@]} > 1 )); then
-            info "Multiple tracks matched: choose the correct track below:"
+            info "Multiple tracks matched: choose the correct track below or press N to select a new track:"
             tracks_list=()
             for i in "${!matched_tracks[@]}"; do
                 track=${matched_tracks[$i]}
@@ -549,7 +563,12 @@ while true; do
                     echo "$entry"
                 done | sed 's/ -- /|/g'
             } | column -ts '|'
-            index=$(user_selection "Index: " $(seq 0 ${#tracks_list[@]}))
+            while ! index=$(user_selection "Selection: " $(seq 0 ${#tracks_list[@]}) N n); do
+                warn "Invalid selection: $index"
+            done
+            if [[ "$index" =~ [Nn] ]]; then
+                continue
+            fi
             track=${matched_tracks[$index]}
         else
             track=${matched_tracks[0]}
@@ -664,6 +683,7 @@ while true; do
         fi
     done
     until [[ "$program_selection" =~ [Nn] ]]; do
+        print_clip_info
         while ! select_program no_x_test; do
             warn "Invalid program selection '$program_selection'"
         done
