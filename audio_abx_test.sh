@@ -234,6 +234,7 @@ user_timestamps() {
     done
 
     sanitize_timestamps
+    echo >&2
 }
 
 async_cleanup() {
@@ -437,10 +438,13 @@ generate_track_details() {
     local mediainfo_output='General;%Artist%|%Album%|%Title%|%BitRate%|%Format%'
     local t_artist t_album t_title t_bitrate t_format
     IFS='|' read -r t_artist t_album t_title t_bitrate t_format < <("${mediainfo:?}" --output="$mediainfo_output" "$mediainfo_track")
+    max_length=30
+
+    t_artist=$(ellipsize "$max_length" "$t_artist")
+    t_album=$(ellipsize "$max_length" "$t_album")
+    t_title=$(ellipsize "$max_length" "$t_title")
+
     local track_details="$t_artist -- $t_album -- $t_title"
-    if (( ${#track_details} > 90 )); then
-        track_details="${track_details::90}..."
-    fi
     track_details_map["$track"]=$track_details
     artists_map["$track"]=$t_artist
     albums_map["$track"]=$t_album
@@ -458,6 +462,17 @@ print_clip_info() {
     echo "Format: ${format_map["$track"]}"
     echo "$(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)"
     echo
+}
+
+ellipsize() {
+    len=$1
+    shift
+    str=$*
+    if (( ${#str} > len + 3 )); then
+        echo "${str::$len}..."
+    else
+        echo "$str"
+    fi
 }
 
 config_file="$HOME/audio_abx_test.cfg"
