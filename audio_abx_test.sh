@@ -192,11 +192,11 @@ create_clip() {
     trap 'rm -f "$tmp_mp3"' RETURN
     local tmp_mp3; tmp_mp3=$(mktemp --suffix=.mp3)
 
-    "${ffmpeg:?}" -loglevel error -y -i "$ffmpeg_track" \
+    "${ffmpeg:?}" -nostdin -loglevel error -y -i "$ffmpeg_track" \
         -ss "$startsec" -t "$clip_duration" "$ffmpeg_lossless_clip" \
         -ss "$startsec" -t "$clip_duration" -b:a "$bitrate" "$tmp_mp3"
 
-    "${ffmpeg:?}" -loglevel error -y -i "$tmp_mp3" "$ffmpeg_lossy_clip"
+    "${ffmpeg:?}" -nostdin -loglevel error -y -i "$tmp_mp3" "$ffmpeg_lossy_clip"
 }
 
 # Generate random timestamps to use for clipping
@@ -384,7 +384,7 @@ save_clip() {
             touch "$save_file"
             save_file=$(wslpath -w "$save_file")
         fi
-        if "${ffmpeg:?}" -y -loglevel error -i "$clip_to_save" "$save_file"; then
+        if "${ffmpeg:?}" -nostdin -y -loglevel error -i "$clip_to_save" "$save_file"; then
             echo "${compression^} clip saved to:"
             echo "$save_file"
         else
@@ -525,7 +525,7 @@ while true; do
         track="${alltracks[$rand_idx]}"
         generate_track_details "$track"
     else
-        mapfile -t matched_tracks < <(find "${alltracks[@]}" -maxdepth 0 -iname "*$search_string*")
+        mapfile -t matched_tracks < <(find "${alltracks[@]}" -maxdepth 0 -iregex ".*$search_string.*" -regextype egrep)
         if (( ${#matched_tracks[@]} == 0 )); then
             info "No tracks matched"
             continue
@@ -663,7 +663,7 @@ while true; do
             break
         fi
     done
-    while ! [[ "$program_selection" =~ [Nn] ]]; do
+    until [[ "$program_selection" =~ [Nn] ]]; do
         while ! select_program no_x_test; do
             warn "Invalid program selection '$program_selection'"
         done
