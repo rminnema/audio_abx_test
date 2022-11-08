@@ -129,8 +129,6 @@ select_program() {
             select_bitrate
             create_clip &
             create_clip_pid=$!
-            print_clip_info
-            select_program
             return 0
             ;;
         T|t)
@@ -225,7 +223,7 @@ user_timestamps() {
             track_duration_int=${durations_map["$track"]}
             startsec=$(shuf -i 0-"$(( track_duration_int - clip_duration ))" -n 1 --random-source=/dev/urandom)
             endsec=$(( startsec + clip_duration ))
-        elif [[ "$startts" =~ ^[0-9]+$ ]]; then
+        else
             startsec=$(parse_timespec_to_seconds "$startts")
         fi
     done
