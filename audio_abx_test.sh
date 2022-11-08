@@ -522,12 +522,10 @@ trap show_results_and_cleanup EXIT
 while ! random=$(user_selection "Fully random song and timestamp selection (y/n): " Y y N n); do
     warn "Invalid selection: '$random'"
 done
-#echo
 
 while ! source_quality=$(user_selection "Source quality (L for lossless, M for mixed lossy/lossless): " L l M m); do
     warn "Invalid selection: '$source_quality'"
 done
-#echo
 
 if [[ "$source_quality" =~ [Ll] ]]; then
     mapfile -t all_tracks < <(find "$music_dir" -type f -iname "*.flac")
