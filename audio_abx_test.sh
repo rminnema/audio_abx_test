@@ -549,10 +549,7 @@ while true; do
                     echo "$entry"
                 done | sed 's/ -- /|/g'
             } | column -ts '|'
-            read -rp "Index: " index
-            if [[ -z "$index" || "$index" =~ [^0-9] ]] || (( index >= ${#matched_tracks[@]} )); then
-                continue
-            fi
+            index=$(user_selection "Index: " $(seq 0 ${#tracks_list[@]}))
             track=${matched_tracks[$index]}
         else
             track=${matched_tracks[0]}
