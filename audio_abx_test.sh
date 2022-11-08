@@ -70,11 +70,18 @@ play_clip() {
         vlc_clip=$1
     fi
 
-    if kill -0 $! 2>/dev/null; then
+    if kill -0 "$create_clip_pid" 2>/dev/null; then
+        echo
         info "Please wait while clip creation finishes."
+        wait "$create_clip_pid"
     fi
-    wait $!
-    "${vlc:?}" "$vlc_clip" &>/dev/null || errr "VLC could not play the clip"
+    if kill -0 "$vlc_pid" 2>/dev/null; then
+        echo
+        info "You must close the first instance of VLC to open another one."
+        wait "$vlc_pid"
+    fi
+    "${vlc:?}" "$vlc_clip" &>/dev/null &
+    vlc_pid=$!
 }
 
 # Provide the user with main options and take actions accordingly
@@ -374,11 +381,16 @@ save_clip() {
     end_ts=$(date -u --date=@"$endsec" +%H%M%S | sed -r 's/00([0-9]{4})/\1/g')
     local save_file="$clips_dir/$save_file_basename -- $compression.$start_ts.$end_ts.$file_fmt"
 
-    if kill -0 $! 2>/dev/null; then
+    if kill -0 "$create_clip_pid" 2>/dev/null; then
         echo
         info "Please wait while clip creation finishes."
+        wait "$create_clip_pid"
     fi
-    wait $!
+    if kill -0 "$vlc_pid" 2>/dev/null; then
+        echo
+        info "You must close VLC to continue"
+        wait "$vlc_pid"
+    fi
     echo
     if [[ "$save_choice_2" == 1 ]]; then
         if cp "$clip_to_save" "$save_file"; then
