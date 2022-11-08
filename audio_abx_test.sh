@@ -556,6 +556,7 @@ while true; do
             track=${matched_tracks[$index]}
         else
             track=${matched_tracks[0]}
+            generate_track_details "$track"
         fi
     fi
     track_w=$(wslpath -w "$track")
