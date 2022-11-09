@@ -99,7 +99,9 @@ select_program() {
         numbered_option "Next track" "N" && options+=( "N" )
     fi
     numbered_option "Change bitrate" "C" && options+=( "C" )
-    numbered_option "Print results" "P" && options+=( "P" )
+    if (( ${#results[@]} > 0 )); then
+        numbered_option "Print results" "P" && options+=( "P" )
+    fi
     numbered_option "Reset score" "T" && options+=( "T" )
     numbered_option "Save clip" "S" && options+=( "S" )
     numbered_option "Quit" "Q" && options+=( "Q" )
@@ -180,7 +182,7 @@ select_program() {
             else
                 if ! random_timestamps; then
                     warn "Something went wrong with random timestamps"
-                    return 0
+                    return 1
                 fi
             fi
             create_clip &
@@ -230,7 +232,7 @@ random_timestamps() {
     clip_duration=30
     local track_duration_int=${durations_map["$track"]}
     if (( track_duration_int < clip_duration)); then
-        return 1
+        clip_duration=$track_duration_int
     fi
     startsec=$(shuf -i 0-"$(( track_duration_int - clip_duration ))" -n 1 --random-source=/dev/urandom)
     endsec=$(( startsec + clip_duration ))
@@ -240,14 +242,12 @@ random_timestamps() {
 # Prompt the user for timestamps to use for clipping
 user_timestamps() {
     unset startsec endsec
+    info "Track duration: $(date -u --date=@"${durations_map["$track"]}" +%H:%M:%S | sed -r 's/^00:([0-9]{2}:[0-9]{2})/\1/g')"
     while [[ -z "$startsec" ]]; do
         read -rp "Start timestamp: " startts
         if [[ -z "$startts" || "$startts" =~ ^[Rr]$ ]]; then
             info "Selecting random timestamp for a 30 second clip"
-            clip_duration=30
-            track_duration_int=${durations_map["$track"]}
-            startsec=$(shuf -i 0-"$(( track_duration_int - clip_duration ))" -n 1 --random-source=/dev/urandom)
-            endsec=$(( startsec + clip_duration ))
+            random_timestamps
         else
             startsec=$(parse_timespec_to_seconds "$startts")
         fi
@@ -436,21 +436,29 @@ save_clip() {
 # Generate a printout of the results, showing all tracks that have been presented so far
 # Along with the results and guesses for each X test
 print_results() {
-    if [[ -z "$quit" ]]; then
-        clear
+    if (( ${#results[@]} > 0 )); then
+        if [[ -z "$quit" ]]; then
+            clear
+            echo "Current track info:"
+            {
+                echo "Artist|Album|Title"
+                echo "${track_details_map["$track"]}"
+            } | column -ts '|'
+            echo "Current bitrate: ${bitrate}bps"
+        fi
+        echo
+        {
+            echo "Number|Artist|Album|Track|Result|Guess"
+            for result in "${results[@]}"; do
+                echo "$result"
+            done
+        } | column -ts '|'
+        echo "$accuracy% accuracy, $correct correct out of $(( correct + incorrect )) tries, $skipped skipped"
+        if [[ -z "$quit" ]]; then
+            read -rsp "Press enter to continue:" _
+            echo >&2
+        fi
     fi
-    echo "Current bitrate: ${bitrate}bps"
-    {
-        echo "Number|File|Result|Guess"
-        for result in "${results[@]}"; do
-            echo "$result"
-        done
-    } | column -ts '|'
-    echo "$accuracy% accuracy, $correct correct out of $(( correct + incorrect )) tries, $skipped skipped"
-    if [[ -z "$quit" ]]; then
-        read -rsp "Press enter to continue:" _
-    fi
-    echo >&2
 }
 
 generate_track_details() {
@@ -481,7 +489,7 @@ generate_track_details() {
     t_album=$(ellipsize "$max_length" "$t_album")
     t_title=$(ellipsize "$max_length" "$t_title")
 
-    local track_details="$t_artist -- $t_album -- $t_title"
+    local track_details="$t_artist|$t_album|$t_title"
     track_details_map["$track"]=$track_details
     artists_map["$track"]=$t_artist
     albums_map["$track"]=$t_album
@@ -538,7 +546,7 @@ x_test() {
         while ! [[ "$confirmation" =~ [Yy] ]]; do
             echo
             echo "Which did you just hear?"
-            while ! guess=$(user_selection "1 for lossless, 2 for lossy: " 1 2); do
+            while ! guess=$(user_selection "1 for original, 2 for compressed: " 1 2); do
                 warn "Invalid selection: '$guess'"
             done
             echo
@@ -573,6 +581,51 @@ x_test() {
     no_skip=false
     read -rsp "Press enter to continue:" _
     echo >&2
+}
+
+track_search() {
+    mapfile -t matched_tracks < <(IFS=$'\n'; grep -Ei "[^/]*$search_string[^/]*$" <<< "${all_tracks[*]}")
+    if (( ${#matched_tracks[@]} == 0 )); then
+        info "No tracks matched"
+        return 1
+    elif (( ${#matched_tracks[@]} > 20 )); then
+        info "Too many tracks matched"
+        return 1
+    elif (( ${#matched_tracks[@]} > 1 )); then
+        info "Multiple tracks matched: choose the correct track below or press N to select a new track:"
+        tracks_list=()
+        for i in "${!matched_tracks[@]}"; do
+            track=${matched_tracks[$i]}
+            generate_track_details "$track"
+            duration_sec=${durations_map["$track"]}
+            duration_str=$(date -u --date="@$duration_sec" +%M:%S | sed -r 's/00:([0-9]{2}:[0-9]{2})/\1/g')
+            track_info=${track_details_map["$track"]}
+            tracks_list+=( "$i|$track_info|$duration_str" )
+        done
+        {
+            echo "Number|Artist|Album|Title|Duration"
+            for entry in "${tracks_list[@]}"; do
+                echo "$entry"
+            done
+        } | column -ts '|'
+        while ! index=$(user_selection "Selection: " $(seq 0 ${#tracks_list[@]}) N n); do
+            warn "Invalid selection: $index"
+        done
+        if [[ "$index" =~ [Nn] ]]; then
+            return 1
+        fi
+        track=${matched_tracks[$index]}
+    else
+        track=${matched_tracks[0]}
+        generate_track_details "$track"
+    fi
+}
+
+random_track() {
+    local max_idx=$(( ${#all_tracks[@]} - 1 ))
+    local rand_idx; rand_idx=$(shuf -i 0-"$max_idx" -n 1 --random-source=/dev/urandom)
+    track="${all_tracks[$rand_idx]}"
+    generate_track_details "$track"
 }
 
 config_file="$HOME/audio_abx_test.cfg"
@@ -639,50 +692,19 @@ fi
 
 declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
 while true; do
+    if kill -0 "$create_clip_pid" 2>/dev/null; then
+        kill "$create_clip_pid" 2>/dev/null
+    fi
     echo
     if ! [[ "$random" =~ [Yy] ]]; then
         read -rp "Track search string: " search_string
     fi
     if [[ -z "$search_string" ]]; then
-        max_idx=$(( ${#all_tracks[@]} - 1 ))
-        rand_idx=$(shuf -i 0-"$max_idx" -n 1 --random-source=/dev/urandom)
-        track="${all_tracks[$rand_idx]}"
-        generate_track_details "$track"
+        random_track
     else
-        mapfile -t matched_tracks < <(IFS=$'\n'; grep -Ei "[^/]*$search_string[^/]*$" <<< "${all_tracks[*]}")
-        if (( ${#matched_tracks[@]} == 0 )); then
-            info "No tracks matched"
+        echo "Search string: '$search_string'" >&2
+        if ! track_search; then
             continue
-        elif (( ${#matched_tracks[@]} > 20 )); then
-            info "Too many tracks matched"
-            continue
-        elif (( ${#matched_tracks[@]} > 1 )); then
-            info "Multiple tracks matched: choose the correct track below or press N to select a new track:"
-            tracks_list=()
-            for i in "${!matched_tracks[@]}"; do
-                track=${matched_tracks[$i]}
-                generate_track_details "$track"
-                duration_sec=${durations_map["$track"]}
-                duration_str=$(date -u --date="@$duration_sec" +%M:%S | sed -r 's/00:([0-9]{2}:[0-9]{2})/\1/g')
-                track_info=${track_details_map["$track"]}
-                tracks_list+=( "$i|$track_info|$duration_str" )
-            done
-            {
-                echo "Number|Artist|Album|Title|Duration"
-                for entry in "${tracks_list[@]}"; do
-                    echo "$entry"
-                done | sed 's/ -- /|/g'
-            } | column -ts '|'
-            while ! index=$(user_selection "Selection: " $(seq 0 ${#tracks_list[@]}) N n); do
-                warn "Invalid selection: $index"
-            done
-            if [[ "$index" =~ [Nn] ]]; then
-                continue
-            fi
-            track=${matched_tracks[$index]}
-        else
-            track=${matched_tracks[0]}
-            generate_track_details "$track"
         fi
     fi
     track_w=$(wslpath -w "$track")
@@ -713,6 +735,7 @@ while true; do
         print_clip_info
         while ! select_program; do
             warn "Invalid selection '$program_selection'"
+            read -rsp "Press enter to continue:" _
             print_clip_info
         done
         if [[ "$program_selection" =~ [Nn] ]]; then
