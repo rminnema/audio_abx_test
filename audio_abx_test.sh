@@ -413,11 +413,6 @@ save_clip() {
         info "Please wait while clip creation finishes."
         wait "$create_clip_pid"
     fi
-    if kill -0 "$vlc_pid" 2>/dev/null; then
-        echo
-        info "You must close VLC to continue"
-        wait "$vlc_pid"
-    fi
     echo
     if [[ "$save_choice_2" == 1 ]]; then
         if cp "$clip_to_save" "$save_file"; then
