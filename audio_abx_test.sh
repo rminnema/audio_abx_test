@@ -163,6 +163,11 @@ select_program() {
             fi
             return 0 ;;
         Q|q)
+            if ! "$x_test_complete"; then
+                track_info=${track_details_map["$track"]}
+                result="$(( ${#results[@]} + 1 ))|$track_info|Quit|${YELLOW}Quit${NOCOLOR}"
+                results+=( "$result" )
+            fi
             exit 0 ;;
         R|r)
             while ! timestamp_selection=$(user_selection "U for user-selected timestamps, R for random: " U u R r); do
