@@ -91,11 +91,11 @@ select_program() {
 
     numbered_option "A test (original quality)" "A" && options+=( "A" )
     numbered_option "B test (${bitrate::-1} kbps lossy)" "B" && options+=( "B" )
-    if ! grep -q "no_x_test" <<< "$*"; then
+    if ! "$x_test_complete"; then
         numbered_option "X test (unknown)" "X" && options+=( "X" )
     fi
     numbered_option "Re-clip track" "R" && options+=( "R" )
-    if ! grep -q "no_skip" <<< "$*"; then
+    if ! "$no_skip"; then
         numbered_option "Next track" "N" && options+=( "N" )
     fi
     numbered_option "Change bitrate" "C" && options+=( "C" )
@@ -113,9 +113,13 @@ select_program() {
     fi
     case "$program_selection" in
         A|a)
-            format=lossless ;;
+            format=lossless
+            play_clip "$lossless_clip"
+            ;;
         B|b)
-            format=lossy ;;
+            format=lossy
+            play_clip "$lossy_clip"
+            ;;
         X|x)
             if [[ ! -f "$x_clip" ]]; then
                 x_clip=$(mktemp --suffix=.wav)
@@ -127,6 +131,8 @@ select_program() {
                 format=lossy
                 cp "$lossy_clip" "$x_clip"
             fi
+            play_clip "$x_clip"
+            x_test
             ;;
         S|s)
             save_clip ;;
@@ -149,6 +155,12 @@ select_program() {
             return 0
             ;;
         N|n)
+            if ! "$no_skip" && ! "$x_test_complete"; then
+                skipped=$(( skipped + 1 ))
+                track_info=${track_details_map["$track"]}
+                result="$(( ${#results[@]} + 1 ))|$track_info|Skipped|${YELLOW}Skipped${NOCOLOR}"
+                results+=( "$result" )
+            fi
             return 0 ;;
         Q|q)
             exit 0 ;;
@@ -487,6 +499,66 @@ ellipsize() {
     fi
 }
 
+x_test() {
+    forfeit=false
+    no_skip=true
+    while ! retry_guess_forfeit=$(user_selection "Guess (G), Retry (R), or forfeit (F): " G g R r F f); do
+        warn "Invalid selection: '$retry_guess_forfeit'"
+        echo >&2
+    done
+    if [[ "$retry_guess_forfeit" =~ [Rr] ]]; then
+        return 0
+    elif [[ "$retry_guess_forfeit" =~ [Ff] ]]; then
+        incorrect=$(( incorrect + 1 ))
+        forfeit=true
+        echo
+        info "You forfeited. The file was ${format^^}"
+        track_info=${track_details_map["$track"]}
+        result="$(( ${#results[@]} + 1 ))|$track_info|${format^}|${RED}Forfeit${NOCOLOR}"
+        results+=( "$result" )
+        x_test_complete=true
+        no_skip=false
+    fi
+    if ! "$forfeit"; then
+        unset confirmation
+        while ! [[ "$confirmation" =~ [Yy] ]]; do
+            echo
+            echo "Which did you just hear?"
+            while ! guess=$(user_selection "1 for lossless, 2 for lossy: " 1 2); do
+                warn "Invalid selection: '$guess'"
+            done
+            echo
+            while ! confirmation=$(user_selection "Are you sure? (y/n): " Y y N n); do
+                warn "Invalid selection: '$confirmation'"
+            done
+        done
+        if [[ "$guess" == 1 ]]; then
+            guess_fmt=Lossless
+        else
+            guess_fmt=Lossy
+        fi
+        echo
+        if [[ "$guess" == 1 && "$format" == lossless ]] || [[ "$guess" == 2 && "$format" == lossy ]]; then
+            correct=$(( correct + 1 ))
+            color=$GREEN
+            echo "${color}CORRECT!${NOCOLOR} The file was ${format^^}"
+        else
+            incorrect=$(( incorrect + 1 ))
+            color=$RED
+            echo "${color}INCORRECT.${NOCOLOR} The file was ${format^^}"
+        fi
+        track_info=${track_details_map["$track"]}
+        result="$(( ${#results[@]} + 1 ))|$track_info|${format^}|${color}${guess_fmt}${NOCOLOR}"
+        results+=( "$result" )
+    fi
+    accuracy=$(bc <<< "100 * $correct / ($correct + $incorrect)")
+    echo "Your accuracy is now $accuracy% ($correct/$(( correct + incorrect )))"
+    echo "$skipped tracks skipped"
+    echo
+    x_test_complete=true
+    no_skip=false
+}
+
 config_file="$HOME/audio_abx_test.cfg"
 if [[ -f "$config_file" ]]; then
     music_dir=$(awk -F '=' '/^music_dir=/ { print $2 }' "$config_file")
@@ -620,103 +692,16 @@ while true; do
     create_clip_pid=$!
 
     randombit=$(( RANDOM%2 ))
-    no_skip=''
+    no_skip=false
+    x_test_complete=false
     while true; do
         print_clip_info
-        while ! select_program ${no_skip:+no_skip}; do
+        while ! select_program; do
             warn "Invalid selection '$program_selection'"
             print_clip_info
         done
-        case "$program_selection" in
-            A|a)
-                play_clip "$lossless_clip" ;;
-            B|b)
-                play_clip "$lossy_clip" ;;
-            X|x)
-                play_clip "$x_clip" ;;
-            N|n)
-                if [[ -z "$no_skip" ]]; then
-                    skipped=$(( skipped + 1 ))
-
-                    track_info=${track_details_map["$track"]}
-                    result="$(( ${#results[@]} + 1 ))|$track_info|Skipped|${YELLOW}Skipped${NOCOLOR}"
-                    results+=( "$result" )
-                    break
-                fi
-                ;;
-            *)
-                continue ;;
-        esac
-        if [[ "$program_selection" =~ [Xx] ]]; then
-            forfeit=false
-            no_skip=true
-            while ! retry_guess_forfeit=$(user_selection "Guess (G), Retry (R), or forfeit (F): " G g R r F f); do
-                warn "Invalid selection: '$retry_guess_forfeit'"
-                echo >&2
-            done
-            if [[ "$retry_guess_forfeit" =~ [Rr] ]]; then
-                continue
-            elif [[ "$retry_guess_forfeit" =~ [Ff] ]]; then
-                incorrect=$(( incorrect + 1 ))
-                forfeit=true
-                echo
-                info "You forfeited. The file was ${format^^}"
-                track_info=${track_details_map["$track"]}
-                result="$(( ${#results[@]} + 1 ))|$track_info|${format^}|${RED}Forfeit${NOCOLOR}"
-                results+=( "$result" )
-                break
-            fi
-            if ! "$forfeit"; then
-                unset confirmation
-                while ! [[ "$confirmation" =~ [Yy] ]]; do
-                    echo
-                    echo "Which did you just hear?"
-                    while ! guess=$(user_selection "1 for lossless, 2 for lossy: " 1 2); do
-                        warn "Invalid selection: '$guess'"
-                    done
-                    echo
-                    while ! confirmation=$(user_selection "Are you sure? (y/n): " Y y N n); do
-                        warn "Invalid selection: '$confirmation'"
-                    done
-                done
-                if [[ "$guess" == 1 ]]; then
-                    guess_fmt=Lossless
-                else
-                    guess_fmt=Lossy
-                fi
-                echo
-                if [[ "$guess" == 1 && "$format" == lossless ]] || [[ "$guess" == 2 && "$format" == lossy ]]; then
-                    correct=$(( correct + 1 ))
-                    color=$GREEN
-                    echo "${color}CORRECT!${NOCOLOR} The file was ${format^^}"
-                else
-                    incorrect=$(( incorrect + 1 ))
-                    color=$RED
-                    echo "${color}INCORRECT.${NOCOLOR} The file was ${format^^}"
-                fi
-                track_info=${track_details_map["$track"]}
-                result="$(( ${#results[@]} + 1 ))|$track_info|${format^}|${color}${guess_fmt}${NOCOLOR}"
-                results+=( "$result" )
-            fi
-            accuracy=$(bc <<< "100 * $correct / ($correct + $incorrect)")
-            echo "Your accuracy is now $accuracy% ($correct/$(( correct + incorrect )))"
-            echo "$skipped tracks skipped"
-            echo
+        if [[ "$program_selection" =~ [Nn] ]]; then
             break
         fi
-    done
-    until [[ "$program_selection" =~ [Nn] ]]; do
-        print_clip_info
-        while ! select_program no_x_test; do
-            warn "Invalid program selection '$program_selection'"
-        done
-        case "$program_selection" in
-            A|a)
-                play_clip "$lossless_clip" ;;
-            B|b)
-                play_clip "$lossy_clip" ;;
-            *)
-                continue ;;
-        esac
     done
 done
