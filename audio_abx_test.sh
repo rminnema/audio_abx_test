@@ -115,8 +115,8 @@ select_program() {
     fi
     case "$program_selection" in
         A|a)
-            format=lossless
-            play_clip "$lossless_clip"
+            format=original
+            play_clip "$original_clip"
             ;;
         B|b)
             format=lossy
@@ -127,8 +127,8 @@ select_program() {
                 x_clip=$(mktemp --suffix=.wav)
             fi
             if (( randombit )); then
-                format=lossless
-                cp "$lossless_clip" "$x_clip"
+                format=original
+                cp "$original_clip" "$x_clip"
             else
                 format=lossy
                 cp "$lossy_clip" "$x_clip"
@@ -204,16 +204,16 @@ numbered_option() {
     fi
 }
 
-# Create a lossless clip and a lossy clip from a given track at the given timestamps
-# Obfuscate both lossless and lossy clips as .wav so it cannot easily be determined which is the X file
+# Create an original-quality clip and a lossy clip from a given track at the given timestamps
+# Obfuscate both original quality and lossy clips as .wav so it cannot easily be determined which is the X file
 create_clip() {
     if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
         local ffmpeg_track="$track_w"
-        local ffmpeg_lossless_clip="$lossless_clip_w"
+        local ffmpeg_original_clip="$original_clip_w"
         local ffmpeg_lossy_clip="$lossy_clip_w"
     else
         local ffmpeg_track="$track"
-        local ffmpeg_lossless_clip="$lossless_clip"
+        local ffmpeg_original_clip="$original_clip"
         local ffmpeg_lossy_clip="$lossy_clip"
     fi
 
@@ -221,7 +221,7 @@ create_clip() {
     local tmp_mp3; tmp_mp3=$(mktemp --suffix=.mp3)
 
     "${ffmpeg:?}" -nostdin -loglevel error -y -i "$ffmpeg_track" \
-        -ss "$startsec" -t "$clip_duration" "$ffmpeg_lossless_clip" \
+        -ss "$startsec" -t "$clip_duration" "$ffmpeg_original_clip" \
         -ss "$startsec" -t "$clip_duration" -b:a "$bitrate" "$tmp_mp3"
 
     "${ffmpeg:?}" -nostdin -loglevel error -y -i "$tmp_mp3" "$ffmpeg_lossy_clip"
@@ -266,7 +266,7 @@ async_cleanup() {
     while kill -0 "$create_clip_pid" 2>/dev/null; do
         sleep 0.1
     done
-    rm -f "${lossless_clips[@]}" "${lossy_clips[@]}" "$x_clip"
+    rm -f "${original_clips[@]}" "${lossy_clips[@]}" "$x_clip"
 }
 
 # Trap function to run on exit, dispalying the results and deleting all files used
@@ -368,29 +368,38 @@ select_bitrate() {
     fi
 }
 
-# Save either the lossy or lossless clip with a user-friendly name to the clips_dir
+# Save either the lossy or original clip with a user-friendly name to the clips_dir
 # Optional lossless compression to FLAC
 save_clip() {
     local save_choice_1
-    while ! save_choice_1=$(user_selection "1 to save lossless, 2 for lossy: " 1 2); do
+    local count=0
+    local options=()
+    numbered_option "Save original quality" "O" && options+=( "O" )
+    numbered_option "Save lossy quality" "L" && options+=( "L" )
+    while ! save_choice_1=$(user_selection "Selection: " $(seq "$count") "${options[@]^^}" "${options[@],,}"); do
         warn "Invalid selection: '$save_choice_1'"
     done
+    echo
     local save_choice_2
-    while ! save_choice_2=$(user_selection "1 to save as WAV, 2 as FLAC: " 1 2); do
+    local count=0
+    local options=()
+    numbered_option "Save as WAV" "W" && options+=( "W" )
+    numbered_option "Save as FLAC" "F" && options+=( "F" )
+    while ! save_choice_2=$(user_selection "Selection: " $(seq "$count") "${options[@]^^}" "${options[@],,}"); do
         warn "Invalid selection: '$save_choice_2'"
     done
     local artist=${artists_map["$track"]}
     local album=${albums_map["$track"]}
     local title=${titles_map["$track"]}
     local save_file_basename && save_file_basename=$(sed 's/\//-/g' <<< "$artist -- $album -- $title")
-    if [[ "$save_choice_1" == 1 ]]; then
-        local compression=lossless
-        local clip_to_save="$lossless_clip"
+    if [[ "$save_choice_1" =~ [Oo] ]]; then
+        local compression=original
+        local clip_to_save="$original_clip"
     else
         local compression=lossy
         local clip_to_save="$lossy_clip"
     fi
-    if [[ "$save_choice_2" == 1 ]]; then
+    if [[ "$save_choice_2" =~ [Ww] ]]; then
         local file_fmt=wav
     else
         local file_fmt=flac
@@ -546,7 +555,7 @@ x_test() {
         while ! [[ "$confirmation" =~ [Yy] ]]; do
             echo
             echo "Which did you just hear?"
-            while ! guess=$(user_selection "O for original, C for compressed: " O o C c); do
+            while ! guess=$(user_selection "O for original, L for lossy: " O o L l); do
                 warn "Invalid selection: '$guess'"
             done
             echo
@@ -555,7 +564,7 @@ x_test() {
             done
         done
         if [[ "$guess" =~ [Oo] ]]; then
-            guess_fmt=lossless
+            guess_fmt=original
         else
             guess_fmt=lossy
         fi
@@ -666,7 +675,7 @@ for cmd in ffmpeg vlc mediainfo ffprobe; do
     fi
 done
 
-lossless_clips=()
+original_clips=()
 lossy_clips=()
 
 select_bitrate
@@ -718,9 +727,9 @@ while true; do
         fi
     fi
 
-    lossless_clips+=( "$(mktemp --suffix=.wav)" )
-    lossless_clip=${lossless_clips[-1]}
-    lossless_clip_w=$(wslpath -w "$lossless_clip")
+    original_clips+=( "$(mktemp --suffix=.wav)" )
+    original_clip=${original_clips[-1]}
+    original_clip_w=$(wslpath -w "$original_clip")
     lossy_clips+=( "$(mktemp --suffix=.wav)" )
     lossy_clip=${lossy_clips[-1]}
     lossy_clip_w=$(wslpath -w "$lossy_clip")
