@@ -546,7 +546,7 @@ x_test() {
         while ! [[ "$confirmation" =~ [Yy] ]]; do
             echo
             echo "Which did you just hear?"
-            while ! guess=$(user_selection "1 for original, 2 for compressed: " 1 2); do
+            while ! guess=$(user_selection "O for original, C for compressed: " O o C c); do
                 warn "Invalid selection: '$guess'"
             done
             echo
@@ -554,13 +554,13 @@ x_test() {
                 warn "Invalid selection: '$confirmation'"
             done
         done
-        if [[ "$guess" == 1 ]]; then
-            guess_fmt=Lossless
+        if [[ "$guess" =~ [Oo] ]]; then
+            guess_fmt=lossless
         else
-            guess_fmt=Lossy
+            guess_fmt=lossy
         fi
         echo
-        if [[ "$guess" == 1 && "$format" == lossless ]] || [[ "$guess" == 2 && "$format" == lossy ]]; then
+        if [[ "$guess_fmt" == "$format" ]]; then
             correct=$(( correct + 1 ))
             color=$GREEN
             echo "${color}CORRECT!${NOCOLOR} The file was ${format^^}"
@@ -570,7 +570,7 @@ x_test() {
             echo "${color}INCORRECT.${NOCOLOR} The file was ${format^^}"
         fi
         track_info=${track_details_map["$track"]}
-        result="$(( ${#results[@]} + 1 ))|$track_info|${format^}|${color}${guess_fmt}${NOCOLOR}"
+        result="$(( ${#results[@]} + 1 ))|$track_info|${format^}|${color}${guess_fmt^}${NOCOLOR}"
         results+=( "$result" )
     fi
     accuracy=$(bc <<< "100 * $correct / ($correct + $incorrect)")
