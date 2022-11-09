@@ -168,6 +168,7 @@ select_program() {
                 result="$(( ${#results[@]} + 1 ))|$track_info|Quit|${YELLOW}Quit${NOCOLOR}"
                 results+=( "$result" )
             fi
+            quit=true
             exit 0 ;;
         R|r)
             while ! timestamp_selection=$(user_selection "U for user-selected timestamps, R for random: " U u R r); do
@@ -428,12 +429,16 @@ save_clip() {
             warn "Could not save $save_file"
         fi
     fi
-    echo
+    read -rsp "Press enter to continue:" _
+    echo >&2
 }
 
 # Generate a printout of the results, showing all tracks that have been presented so far
 # Along with the results and guesses for each X test
 print_results() {
+    if [[ -z "$quit" ]]; then
+        clear
+    fi
     echo "Current bitrate: ${bitrate}bps"
     {
         echo "Number|File|Result|Guess"
@@ -442,7 +447,10 @@ print_results() {
         done
     } | column -ts '|'
     echo "$accuracy% accuracy, $correct correct out of $(( correct + incorrect )) tries, $skipped skipped"
-    echo
+    if [[ -z "$quit" ]]; then
+        read -rsp "Press enter to continue:" _
+    fi
+    echo >&2
 }
 
 generate_track_details() {
@@ -483,6 +491,7 @@ generate_track_details() {
 }
 
 print_clip_info() {
+    clear
     echo "Clip information"
     echo "Artist: ${artists_map["$track"]}"
     echo "Album: ${albums_map["$track"]}"
@@ -633,7 +642,6 @@ while true; do
         read -rp "Track search string: " search_string
     fi
     if [[ -z "$search_string" ]]; then
-        info "Will choose a random track"
         max_idx=$(( ${#all_tracks[@]} - 1 ))
         rand_idx=$(shuf -i 0-"$max_idx" -n 1 --random-source=/dev/urandom)
         track="${all_tracks[$rand_idx]}"
@@ -678,11 +686,11 @@ while true; do
     track_w=$(wslpath -w "$track")
     if [[ -z "$search_string" ]]; then
         if ! random_timestamps; then
-            warn "Something went wrong with random timestamps"
+            errr "Something went wrong with random timestamps"
         fi
     else
         if ! user_timestamps; then
-            warn "Something went wrong with user timestamps"
+            errr "Something went wrong with user timestamps"
         fi
     fi
 
