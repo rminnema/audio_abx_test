@@ -571,6 +571,8 @@ x_test() {
     echo
     x_test_complete=true
     no_skip=false
+    read -rsp "Press enter to continue:" _
+    echo >&2
 }
 
 config_file="$HOME/audio_abx_test.cfg"
