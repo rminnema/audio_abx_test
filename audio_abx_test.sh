@@ -79,7 +79,7 @@ play_clip() {
     fi
     if kill -0 "$vlc_pid" 2>/dev/null; then
         echo
-        info "You must close the first instance of VLC to open another one."
+        info "You must close the current instance of VLC to open another one."
         wait "$vlc_pid"
     fi
     "${vlc:?}" "$vlc_clip" &>/dev/null &
