@@ -18,6 +18,9 @@ user_selection() {
     read -rp "$prompt" selection
     for option in $(seq "$count") "${options[@]^^}" "${options[@],,}"; do
         if [[ "$selection" == "$option" ]]; then
+            if [[ "$selection" =~ ^[0-9]+$ ]] && (( selection >= 1 && selection <= count && ${#options[@]} > 0 )); then
+                selection=${options[$(( selection - 1 ))]^^}
+            fi
             echo "$selection"
             return 0
         fi
@@ -378,16 +381,16 @@ select_bitrate() {
 save_clip() {
     local save_choice_1
     start_options "Select a quality level to save in."
-    numbered_option "Save original quality" "O" && options+=( "O" )
-    numbered_option "Save lossy quality" "L" && options+=( "L" )
+    numbered_option "Save original quality" "O"
+    numbered_option "Save lossy quality" "L"
     while ! save_choice_1=$(user_selection "Selection: "); do
         warn "Invalid selection: '$save_choice_1'"
     done
     echo
     local save_choice_2
     start_options "Select a file format to save in."
-    numbered_option "Save as WAV" "W" && options+=( "W" )
-    numbered_option "Save as FLAC" "F" && options+=( "F" )
+    numbered_option "Save as WAV" "W"
+    numbered_option "Save as FLAC" "F"
     while ! save_choice_2=$(user_selection "Selection: "); do
         warn "Invalid selection: '$save_choice_2'"
     done
@@ -532,9 +535,9 @@ x_test() {
     forfeit=false
     no_skip=true
     start_options
-    numbered_option "Guess" "G" && options+=( "G" )
-    numbered_option "Retry" "R" && options+=( "R" )
-    numbered_option "Forfeit" "F" && options+=( "F" )
+    numbered_option "Guess" "G"
+    numbered_option "Retry" "R"
+    numbered_option "Forfeit" "F"
     while ! retry_guess_forfeit=$(user_selection "Selection: "); do
         warn "Invalid selection: '$retry_guess_forfeit'"
         echo
@@ -557,15 +560,15 @@ x_test() {
         while ! [[ "$confirmation" =~ [Yy] ]]; do
             echo
             start_options "Which did you just hear?"
-            numbered_option "Original quality" "O" && options+=( "O" )
-            numbered_option "Lossy compression" "L" && options+=( "L" )
+            numbered_option "Original quality" "O"
+            numbered_option "Lossy compression" "L"
             while ! guess=$(user_selection "Selection: "); do
                 warn "Invalid selection: '$guess'"
             done
             echo
             start_options "Are you sure?"
-            numbered_option "Yes" "Y" && options+=( "Y" )
-            numbered_option "No" "N" && options+=( "N" )
+            numbered_option "Yes" "Y"
+            numbered_option "No" "N"
             while ! confirmation=$(user_selection "Selection: "); do
                 warn "Invalid selection: '$confirmation'"
             done
@@ -579,11 +582,11 @@ x_test() {
         if [[ "$guess_fmt" == "$format" ]]; then
             correct=$(( correct + 1 ))
             color=$GREEN
-            echo "${color}CORRECT!${NOCOLOR} The file was ${format^^}"
+            echo "${color}CORRECT!${NOCOLOR} The file was ${format^^} and your guess was ${guess_fmt^^}"
         else
             incorrect=$(( incorrect + 1 ))
             color=$RED
-            echo "${color}INCORRECT.${NOCOLOR} The file was ${format^^}"
+            echo "${color}INCORRECT.${NOCOLOR} The file was ${format^^} and your guess was ${guess_fmt^^}"
         fi
         track_info=${track_details_map["$track"]}
         result="$(( ${#results[@]} + 1 ))|$track_info|${format^}|${color}${guess_fmt^}${NOCOLOR}"
