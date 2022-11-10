@@ -91,11 +91,11 @@ select_program() {
     start_options
     numbered_option "A test (original quality)" "A"
     numbered_option "B test (${bitrate::-1} kbps lossy)" "B"
-    if ! "$x_test_complete"; then
+    if ! "$x_test_completed"; then
         numbered_option "X test (unknown)" "X"
     fi
     numbered_option "Re-clip track" "R"
-    if ! "$no_skip"; then
+    if ! "$x_test_attempted" || "$x_test_completed"; then
         numbered_option "Next track" "N"
     fi
     if [[ "$random" =~ [Yy] ]]; then
@@ -129,7 +129,7 @@ select_program() {
             if [[ ! -f "$x_clip" ]]; then
                 x_clip=$(mktemp --suffix=.wav)
             fi
-            if (( randombit )); then
+            if (( x_clip_quality )); then
                 format=original
                 cp "$original_clip" "$x_clip"
             else
@@ -160,7 +160,7 @@ select_program() {
             results=()
             ;;
         N|n)
-            if ! "$no_skip" && ! "$x_test_complete"; then
+            if ! "$x_test_attempted" && ! "$x_test_completed"; then
                 skipped=$(( skipped + 1 ))
                 track_info=${track_details_map["$track"]}
                 result="$(( ${#results[@]} + 1 ))|$track_info|Skipped|${YELLOW}Skipped${NOCOLOR}"
@@ -168,7 +168,7 @@ select_program() {
             fi
             ;;
         Q|q)
-            if ! "$x_test_complete"; then
+            if ! "$x_test_completed"; then
                 track_info=${track_details_map["$track"]}
                 result="$(( ${#results[@]} + 1 ))|$track_info|Quit|${YELLOW}Quit${NOCOLOR}"
                 results+=( "$result" )
@@ -533,7 +533,7 @@ ellipsize() {
 
 x_test() {
     forfeit=false
-    no_skip=true
+    x_test_attempted=true
     start_options
     numbered_option "Guess" "G"
     numbered_option "Retry" "R"
@@ -552,8 +552,6 @@ x_test() {
         track_info=${track_details_map["$track"]}
         result="$(( ${#results[@]} + 1 ))|$track_info|${format^}|${RED}Forfeit${NOCOLOR}"
         results+=( "$result" )
-        x_test_complete=true
-        no_skip=false
     fi
     if ! "$forfeit"; then
         unset confirmation
@@ -596,13 +594,13 @@ x_test() {
     echo "Your accuracy is now $accuracy% ($correct/$(( correct + incorrect )))"
     echo "$skipped tracks skipped"
     echo
-    x_test_complete=true
-    no_skip=false
+    x_test_completed=true
     read -rsp "Press enter to continue:" _
     echo
 }
 
 track_search() {
+    trap 'rm -f "$tmp_output"' RETURN
     mapfile -t matched_tracks < <(IFS=$'\n'; grep -Ei "[^/]*$search_string[^/]*$" <<< "${all_tracks[*]}")
     if (( ${#matched_tracks[@]} == 0 )); then
         info "No tracks matched"
@@ -622,12 +620,14 @@ track_search() {
             tracks_list+=( "$track_info|$duration_str" )
         done
         start_options
+        tmp_output=$(mktemp)
         {
             echo "Artist|Album|Title|Duration"
             for entry in "${tracks_list[@]}"; do
                 numbered_option "$entry"
             done
-        } | column -ts '|'
+        } > "$tmp_output"
+        column -ts '|' "$tmp_output"
         while ! index=$(user_selection "Selection: "); do
             warn "Invalid selection: $index"
         done
@@ -733,7 +733,9 @@ while true; do
     echo
     if "$search_anyway" || ! [[ "$random" =~ [Yy] ]]; then
         read -rp "Track search string: " search_string
-        if ! track_search; then
+        if [[ -z "$search_string" ]]; then
+            random_track
+        elif ! track_search; then
             continue
         fi
         search_anyway=false
@@ -757,9 +759,9 @@ while true; do
     create_clip &
     create_clip_pid=$!
 
-    randombit=$(( RANDOM%2 ))
-    no_skip=false
-    x_test_complete=false
+    x_clip_quality=$(( RANDOM%2 ))
+    x_test_attempted=false
+    x_test_completed=false
     while true; do
         print_clip_info
         while ! select_program; do
