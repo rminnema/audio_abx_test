@@ -685,6 +685,7 @@ if [[ ! -d "$clips_dir" ]]; then
     errr "'$clips_dir' directory does not exist."
 fi
 
+clear
 for cmd in ffmpeg vlc mediainfo ffprobe; do
     cmd_set="$cmd=\$(command -v '$cmd.exe') || $cmd=\$(command -v '$cmd')"
     if ! eval "$cmd_set"; then
