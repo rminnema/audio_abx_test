@@ -72,10 +72,10 @@ play_clip() {
         vlc_clip=$1
     fi
 
-    if kill -0 "$create_clip_pid" 2>/dev/null; then
+    if kill -0 "${create_clip_pids[-1]}" 2>/dev/null; then
         echo
-        info "Please wait while clip creation finishes."
-        wait "$create_clip_pid"
+        info "Please wait while the encoding job finishes."
+        wait "${create_clip_pids[-1]}"
     fi
     if kill -0 "$vlc_pid" 2>/dev/null; then
         echo
@@ -148,7 +148,7 @@ select_program() {
         C|c)
             select_bitrate
             create_clip &
-            create_clip_pid=$!
+            create_clip_pids+=( "$!" )
             ;;
         T|t)
             warn "Resetting score"
@@ -193,7 +193,7 @@ select_program() {
                 fi
             fi
             create_clip &
-            create_clip_pid=$!
+            create_clip_pids+=( "$!" )
             ;;
         *)
             return 1 ;;
@@ -215,18 +215,16 @@ numbered_option() {
 # Create an original-quality clip and a lossy clip from a given track at the given timestamps
 # Obfuscate both original quality and lossy clips as .wav so it cannot easily be determined which is the X file
 create_clip() {
-    if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
-        local ffmpeg_track="$track_w"
-        local ffmpeg_original_clip="$original_clip_w"
-        local ffmpeg_lossy_clip="$lossy_clip_w"
-    else
-        local ffmpeg_track="$track"
-        local ffmpeg_original_clip="$original_clip"
-        local ffmpeg_lossy_clip="$lossy_clip"
-    fi
-
     trap 'rm -f "$tmp_mp3"' RETURN
-    local tmp_mp3; tmp_mp3=$(mktemp --suffix=.mp3)
+    if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
+        local ffmpeg_track; ffmpeg_track=$(wslpath -w "$track")
+        local ffmpeg_original_clip; ffmpeg_original_clip=$(wslpath -w "$original_clip")
+        local ffmpeg_lossy_clip; ffmpeg_lossy_clip=$(wslpath -w "$lossy_clip")
+    else
+        local ffmpeg_track=$track
+        local ffmpeg_original_clip=$original_clip
+        local ffmpeg_lossy_clip=$lossy_clip
+    fi
 
     "${ffmpeg:?}" -nostdin -loglevel error -y -i "$ffmpeg_track" \
         -ss "$startsec" -t "$clip_duration" "$ffmpeg_original_clip" \
@@ -271,13 +269,18 @@ user_timestamps() {
 }
 
 async_cleanup() {
-    while kill -0 "$create_clip_pid" 2>/dev/null || kill -0 "$vlc_pid" 2>/dev/null; do
+    while kill -0 "$" 2>/dev/null || kill -0 "$vlc_pid" 2>/dev/null; do
         sleep 0.1
     done
-    rm -f "${original_clips[@]}" "${lossy_clips[@]}" "$x_clip"
+    for pid in "${create_clip_pids[@]}" "$vlc_pid"; do
+        while kill -0 "$pid" 2>/dev/null; do
+            sleep 0.1
+        done
+    done
+    rm -f "${original_clips[@]}" "${lossy_clips[@]}" "${tmp_mp3s[@]}" "$x_clip"
 }
 
-# Trap function to run on exit, dispalying the results and deleting all files used
+# Trap function to run on exit, displaying the results and deleting all files used
 show_results_and_cleanup() {
     print_results
     async_cleanup &
@@ -414,10 +417,10 @@ save_clip() {
     end_ts=$(date -u --date=@"$endsec" +%H%M%S | sed -r 's/00([0-9]{4})/\1/g')
     local save_file="$clips_dir/$save_file_basename -- $compression.$start_ts.$end_ts.$file_fmt"
 
-    if kill -0 "$create_clip_pid" 2>/dev/null; then
+    if kill -0 "${create_clip_pids[-1]}" 2>/dev/null; then
         echo
         info "Please wait while clip creation finishes."
-        wait "$create_clip_pid"
+        wait "${create_clip_pids[-1]}"
     fi
     echo
     if [[ "$save_choice_2" == 1 ]]; then
@@ -517,7 +520,6 @@ print_clip_info() {
     echo "Avg. Bitrate: ${bitrate_map["$track"]} kbps"
     echo "Format: ${format_map["$track"]}"
     echo "$(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)"
-    #echo########################
 }
 
 ellipsize() {
@@ -601,7 +603,7 @@ x_test() {
 
 track_search() {
     trap 'rm -f "$tmp_output"' RETURN
-    mapfile -t matched_tracks < <(IFS=$'\n'; grep -Ei "[^/]*$search_string[^/]*$" <<< "${all_tracks[*]}")
+    mapfile -t matched_tracks < <(IFS=$'\n'; grep -Ei "[^/]*${search_string}[^/]*$" <<< "${all_tracks[*]}")
     if (( ${#matched_tracks[@]} == 0 )); then
         info "No tracks matched"
         return 1
@@ -693,9 +695,6 @@ for cmd in ffmpeg vlc mediainfo ffprobe; do
     fi
 done
 
-original_clips=()
-lossy_clips=()
-
 select_bitrate
 trap show_results_and_cleanup EXIT
 
@@ -725,11 +724,15 @@ if (( ${#all_tracks[@]} == 0 )); then
     errr "No tracks were found in '$music_dir'"
 fi
 
+original_clips=()
+lossy_clips=()
+tmp_mp3s=()
+
 declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
 search_anyway=false
 while true; do
-    if kill -0 "$create_clip_pid" 2>/dev/null; then
-        kill "$create_clip_pid" 2>/dev/null
+    if (( ${#create_clip_pids[@]} > 0 )); then
+        kill "${create_clip_pids[-1]}" 2>/dev/null
     fi
     echo
     if "$search_anyway" || ! [[ "$random" =~ [Yy] ]]; then
@@ -743,7 +746,6 @@ while true; do
     else
         random_track
     fi
-    track_w=$(wslpath -w "$track")
     if [[ "$search_string" ]]; then
         user_timestamps || errr "Something went wrong with user timestamps"
     else
@@ -752,13 +754,13 @@ while true; do
 
     original_clips+=( "$(mktemp --suffix=.wav)" )
     original_clip=${original_clips[-1]}
-    original_clip_w=$(wslpath -w "$original_clip")
     lossy_clips+=( "$(mktemp --suffix=.wav)" )
     lossy_clip=${lossy_clips[-1]}
-    lossy_clip_w=$(wslpath -w "$lossy_clip")
+    tmp_mp3s+=( "$(mktemp --suffix=.mp3)" )
+    tmp_mp3=${tmp_mp3s[-1]}
 
     create_clip &
-    create_clip_pid=$!
+    create_clip_pids+=( "$!" )
 
     x_clip_quality=$(( RANDOM%2 ))
     x_test_attempted=false
