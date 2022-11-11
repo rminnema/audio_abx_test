@@ -611,7 +611,7 @@ track_search() {
         info "Too many tracks matched"
         return 1
     elif (( ${#matched_tracks[@]} > 1 )); then
-        info "Multiple tracks matched: choose the correct track below or press N to select a new track:"
+        info "Multiple tracks matched: choose the desired track below:"
         tracks_list=()
         for i in "${!matched_tracks[@]}"; do
             track=${matched_tracks[$i]}
@@ -628,6 +628,7 @@ track_search() {
             for entry in "${tracks_list[@]}"; do
                 numbered_option "$entry"
             done
+            numbered_option "Select a new track" "N"
         } > "$tmp_output"
         column -ts '|' "$tmp_output"
         while ! index=$(user_selection "Selection: "); do
