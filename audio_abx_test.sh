@@ -494,21 +494,21 @@ generate_track_details() {
         local mediainfo_track=$1
     fi
     local mediainfo_output='General;%Artist%|%Album%|%Title%|%BitRate%|%Format%'
-    local t_artist t_album t_title t_bitrate t_format
-    IFS='|' read -r t_artist t_album t_title t_bitrate t_format < <("${mediainfo:?}" --output="$mediainfo_output" "$mediainfo_track")
+    local track_artist track_album track_title track_bitrate track_format
+    IFS='|' read -r track_artist track_album track_title track_bitrate track_format < <("${mediainfo:?}" --output="$mediainfo_output" "$mediainfo_track")
     max_length=30
 
-    t_artist=$(ellipsize "$max_length" "$t_artist")
-    t_album=$(ellipsize "$max_length" "$t_album")
-    t_title=$(ellipsize "$max_length" "$t_title")
+    track_artist_ellipsized=$(ellipsize "$max_length" "$track_artist")
+    track_album_ellipsized=$(ellipsize "$max_length" "$track_album")
+    track_title_ellipsized=$(ellipsize "$max_length" "$track_title")
 
-    local track_details="$t_artist|$t_album|$t_title"
+    local track_details="$track_artist_ellipsized|$track_album_ellipsized|$track_title_ellipsized"
     track_details_map["$track"]=$track_details
-    artists_map["$track"]=$t_artist
-    albums_map["$track"]=$t_album
-    titles_map["$track"]=$t_title
-    bitrate_map["$track"]=$(( t_bitrate / 1024 ))
-    format_map["$track"]=$t_format
+    artists_map["$track"]=$track_artist
+    albums_map["$track"]=$track_album
+    titles_map["$track"]=$track_title
+    bitrate_map["$track"]=$(( track_bitrate / 1024 ))
+    format_map["$track"]=$track_format
 }
 
 print_clip_info() {
