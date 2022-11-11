@@ -527,7 +527,7 @@ ellipsize() {
     shift
     str=$*
     if (( ${#str} > len + 3 )); then
-        echo "${str::$len}..."
+        sed 's/\s*$//' <<< "${str::$len}..."
     else
         echo "$str"
     fi
@@ -644,10 +644,11 @@ track_search() {
 }
 
 random_track() {
-    local max_idx=$(( ${#all_tracks[@]} - 1 ))
-    local rand_idx; rand_idx=$(shuf -i 0-"$max_idx" -n 1 --random-source=/dev/urandom)
-    track="${all_tracks[$rand_idx]}"
+    track="${all_tracks[$(( track_index++ ))]}"
     generate_track_details "$track"
+    if (( track_index >= ${#all_tracks[@]} )); then
+        track_index=0
+    fi
 }
 
 start_options() {
@@ -715,15 +716,16 @@ done
 echo
 
 if [[ "$source_quality" =~ [Ll] ]]; then
-    mapfile -t all_tracks < <(find "$music_dir" -type f -iname "*.flac")
+    mapfile -t all_tracks < <(find "$music_dir" -type f -iname "*.flac" | sort -R)
 else
-    mapfile -t all_tracks < <(find "$music_dir" -type f -a \( -iname "*.flac" -o -iname "*.m4a" -o -iname "*.mp3" \))
+    mapfile -t all_tracks < <(find "$music_dir" -type f -a \( -iname "*.flac" -o -iname "*.m4a" -o -iname "*.mp3" \) | sort -R)
 fi
 
 if (( ${#all_tracks[@]} == 0 )); then
     errr "No tracks were found in '$music_dir'"
 fi
 
+track_index=0
 original_clips=()
 lossy_clips=()
 tmp_mp3s=()
