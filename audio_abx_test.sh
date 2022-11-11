@@ -248,7 +248,7 @@ random_timestamps() {
 # Prompt the user for timestamps to use for clipping
 user_timestamps() {
     unset startsec endsec
-    info "Track duration: $(date -u --date=@"${durations_map["$track"]}" +%H:%M:%S | sed -r 's/^00:([0-9]{2}:[0-9]{2})/\1/g')"
+    info "Track duration: $(date -u --date=@"${durations_map["$track"]}" +%H:%M:%S | sed -r 's/00:([0-9]{2}:[0-9]{2})/\1/g')"
     while [[ -z "$startsec" ]]; do
         read -rp "Start timestamp: " startts
         if [[ -z "$startts" || "$startts" =~ ^[Rr]$ ]]; then
@@ -519,7 +519,7 @@ print_clip_info() {
     echo "Title: ${titles_map["$track"]}"
     echo "Avg. Bitrate: ${bitrate_map["$track"]} kbps"
     echo "Format: ${format_map["$track"]}"
-    echo "$(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)"
+    echo "$(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)" | sed -r 's/00:([0-9]{2}:[0-9]{2})/\1/g'
 }
 
 ellipsize() {
@@ -617,7 +617,7 @@ track_search() {
             track=${matched_tracks[$i]}
             generate_track_details "$track"
             duration_sec=${durations_map["$track"]}
-            duration_str=$(date -u --date="@$duration_sec" +%M:%S | sed -r 's/00:([0-9]{2}:[0-9]{2})/\1/g')
+            duration_str=$(date -u --date="@$duration_sec" +%H:%M:%S | sed -r 's/00:([0-9]{2}:[0-9]{2})/\1/g')
             track_info=${track_details_map["$track"]}
             tracks_list+=( "$track_info|$duration_str" )
         done
