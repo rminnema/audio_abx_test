@@ -527,7 +527,7 @@ ellipsize() {
     shift
     str=$*
     if (( ${#str} > len + 3 )); then
-        sed 's/\s*$//' <<< "${str::$len}..."
+        cut -c 1-"$len" <<< "$str" | sed -e 's/\s*$//' -e 's/$/.../'
     else
         echo "$str"
     fi
@@ -736,7 +736,6 @@ while true; do
     if (( ${#create_clip_pids[@]} > 0 )); then
         kill "${create_clip_pids[-1]}" 2>/dev/null
     fi
-    echo
     if "$search_anyway" || ! [[ "$random" =~ [Yy] ]]; then
         read -rp "Track search string: " search_string
         if [[ -z "$search_string" ]]; then
