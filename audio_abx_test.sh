@@ -109,6 +109,7 @@ select_program() {
             search_anyway=true ;;
         C|c)
             select_mp3_bitrate
+            prepare_create_clip
             create_clip &
             create_clip_pids+=( "$!" )
             ;;
@@ -154,6 +155,7 @@ select_program() {
                     return 1
                 fi
             fi
+            prepare_create_clip
             create_clip &
             create_clip_pids+=( "$!" )
             ;;
@@ -343,6 +345,15 @@ ellipsize() {
     else
         echo "$str"
     fi
+}
+
+prepare_create_clip() {
+    original_clips+=( "$(mktemp --suffix=.wav)" )
+    original_clip=${original_clips[-1]}
+    lossy_clips+=( "$(mktemp --suffix=.wav)" )
+    lossy_clip=${lossy_clips[-1]}
+    tmp_mp3s+=( "$(mktemp --suffix=.mp3)" )
+    tmp_mp3=${tmp_mp3s[-1]}
 }
 
 # Create an original-quality clip and a lossy clip from a given track at the given timestamps
@@ -781,13 +792,7 @@ while true; do
         random_timestamps || errr "Something went wrong with random timestamps"
     fi
 
-    original_clips+=( "$(mktemp --suffix=.wav)" )
-    original_clip=${original_clips[-1]}
-    lossy_clips+=( "$(mktemp --suffix=.wav)" )
-    lossy_clip=${lossy_clips[-1]}
-    tmp_mp3s+=( "$(mktemp --suffix=.mp3)" )
-    tmp_mp3=${tmp_mp3s[-1]}
-
+    prepare_create_clip
     create_clip &
     create_clip_pids+=( "$!" )
 
