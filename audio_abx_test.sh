@@ -114,25 +114,16 @@ select_program() {
         T|t)
             warn "Resetting score"
             print_results
-            correct=0
-            incorrect=0
-            skipped=0
-            accuracy=0
-            results=()
+            reset_score
             ;;
         N|n)
             if ! "$x_test_attempted" && ! "$x_test_completed"; then
-                skipped=$(( skipped + 1 ))
-                track_info=${track_details_map["$track"]}
-                result="$(( ${#results[@]} + 1 ))|$track_info|Skipped|${YELLOW}Skipped${NOCOLOR}"
-                results+=( "$result" )
+                add_result skipped
             fi
             ;;
         Q|q)
             if ! "$x_test_completed"; then
-                track_info=${track_details_map["$track"]}
-                result="$(( ${#results[@]} + 1 ))|$track_info|Quit|${YELLOW}Quit${NOCOLOR}"
-                results+=( "$result" )
+                add_result quit
             fi
             quit=true
             exit 0
@@ -158,6 +149,30 @@ select_program() {
         *)
             return 1 ;;
     esac
+}
+
+add_result() {
+    local track_info result numresults
+    track_info=${track_details_map["$track"]}
+    numresults=$(( ${#results[@]} + 1 ))
+    if [[ "$1" == skipped ]]; then
+        skipped=$(( skipped + 1 ))
+        result="$numresults|$track_info|Skipped|${YELLOW}Skipped${NOCOLOR}"
+    elif [[ "$1" == quit ]]; then
+        result="$numresults|$track_info|Quit|${YELLOW}Quit${NOCOLOR}"
+    elif [[ "$1" == forfeit ]]; then
+        incorrect=$(( incorrect + 1 ))
+        result="$numresults|$track_info|Forfeit|${RED}Forfeit${NOCOLOR}"
+    elif [[ "$1" && "$2" && "$1" == "$2" ]]; then
+        correct=$(( correct + 1 ))
+        result="$numresults|$track_info|${1^}|${GREEN}${2^}${NOCOLOR}"
+    elif [[ "$1" && "$2" && "$1" != "$2" ]]; then
+        incorrect=$(( incorrect + 1 ))
+        result="$numresults|$track_info|${1^}|${RED}${2^}${NOCOLOR}"
+    else
+        return 1
+    fi
+    results+=( "$result" )
 }
 
 # Choose the MP3 bitrate for the lossy clip
@@ -214,12 +229,16 @@ select_mp3_bitrate() {
             warn "Resetting score"
             print_results
         fi
-        accuracy=0
-        correct=0
-        incorrect=0
-        skipped=0
-        results=()
+        reset_score
     fi
+}
+
+reset_score() {
+    accuracy=0
+    correct=0
+    incorrect=0
+    skipped=0
+    results=()
 }
 
 track_search() {
@@ -512,13 +531,10 @@ x_test() {
     if [[ "$retry_guess_forfeit" =~ [Rr] ]]; then
         return 0
     elif [[ "$retry_guess_forfeit" =~ [Ff] ]]; then
-        incorrect=$(( incorrect + 1 ))
         forfeit=true
         echo
         info "You forfeited. The file was ${format^^}"
-        track_info=${track_details_map["$track"]}
-        result="$(( ${#results[@]} + 1 ))|$track_info|${format^}|${RED}Forfeit${NOCOLOR}"
-        results+=( "$result" )
+        add_result forfeit
     fi
     if ! "$forfeit"; then
         unset confirmation
@@ -545,17 +561,11 @@ x_test() {
         fi
         echo
         if [[ "$guess_fmt" == "$format" ]]; then
-            correct=$(( correct + 1 ))
-            color=$GREEN
-            echo "${color}CORRECT!${NOCOLOR} The file was ${format^^} and your guess was ${guess_fmt^^}"
+            echo "${GREEN}CORRECT!${NOCOLOR} The file was ${format^^} and your guess was ${guess_fmt^^}"
         else
-            incorrect=$(( incorrect + 1 ))
-            color=$RED
-            echo "${color}INCORRECT.${NOCOLOR} The file was ${format^^} and your guess was ${guess_fmt^^}"
+            echo "${RED}INCORRECT.${NOCOLOR} The file was ${format^^} and your guess was ${guess_fmt^^}"
         fi
-        track_info=${track_details_map["$track"]}
-        result="$(( ${#results[@]} + 1 ))|$track_info|${format^}|${color}${guess_fmt^}${NOCOLOR}"
-        results+=( "$result" )
+        add_result "$format" "$guess_fmt"
     fi
     accuracy=$(bc <<< "100 * $correct / ($correct + $incorrect)")
     echo "Your accuracy is now $accuracy% ($correct/$(( correct + incorrect )))"
