@@ -80,13 +80,9 @@ select_program() {
     fi
     case "$program_selection" in
         A|a)
-            format=original
-            play_clip "$original_clip"
-            ;;
+            play_clip "$original_clip" ;;
         B|b)
-            format=lossy
-            play_clip "$lossy_clip"
-            ;;
+            play_clip "$lossy_clip" ;;
         X|x)
             if [[ ! -f "$x_clip" ]]; then
                 x_clip=$(mktemp --suffix=.wav)
