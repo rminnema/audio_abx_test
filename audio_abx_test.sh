@@ -225,19 +225,33 @@ select_mp3_bitrate() {
 }
 
 track_search() {
-    trap 'rm -f "$tmp_output"' RETURN
-    mapfile -t matched_tracks < <(IFS=$'\n'; grep -Ei "[^/]*${search_string}[^/]*$" <<< "${all_tracks[*]}")
+    if [[ ! -f "$tmp_output" ]]; then
+        tmp_output=$(mktemp)
+    fi
+
+    if kill -0 "$ascii_mapping_pid" 2>/dev/null; then
+        info "Please wait while the conversion of UTF8 filenames to ASCII is done"
+        wait "$ascii_mapping_pid"
+    fi
+    if [[ -f "$ascii_to_utf8_mapfile" ]]; then
+        while IFS='|' read -r utf8 ascii; do
+            ascii_to_utf8_map["$ascii"]=$utf8
+        done < "$ascii_to_utf8_mapfile"
+        rm "$ascii_to_utf8_mapfile"
+    fi
+    echo
+    mapfile -t matched_tracks < <(IFS=$'\n'; grep -Ei "[^/]*${search_string}[^/]*$" <<< "${!ascii_to_utf8_map[*]}")
     if (( ${#matched_tracks[@]} == 0 )); then
         info "No tracks matched"
         return 1
     elif (( ${#matched_tracks[@]} > 20 )); then
         info "Too many tracks matched"
         return 1
-    elif (( ${#matched_tracks[@]} > 1 )); then
-        info "Multiple tracks matched: choose the desired track below:"
+    else
+        info "Select the desired track below:"
         tracks_list=()
         for i in "${!matched_tracks[@]}"; do
-            track=${matched_tracks[$i]}
+            track=${ascii_to_utf8_map["${matched_tracks[$i]}"]}
             generate_track_details "$track"
             duration_sec=${durations_map["$track"]}
             duration_str=$(date -u --date="@$duration_sec" +%H:%M:%S | sed -r 's/00:([0-9]{2}:[0-9]{2})/\1/g')
@@ -245,26 +259,32 @@ track_search() {
             tracks_list+=( "$track_info|$duration_str" )
         done
         start_numbered_options_list
-        tmp_output=$(mktemp)
         {
             echo "Artist|Album|Title|Duration"
             for entry in "${tracks_list[@]}"; do
                 numbered_options_list_option "$entry"
             done
-            numbered_options_list_option "Select a new track" "N"
+            numbered_options_list_option "Select a new track"
         } > "$tmp_output"
         column -ts '|' "$tmp_output"
         while ! index=$(user_selection "Selection: "); do
             warn "Invalid selection: $index"
         done
-        if [[ "$index" =~ [Nn] ]]; then
+        if [[ "$index" == "$count" ]]; then
             return 1
         fi
-        track=${matched_tracks[$(( index - 1 ))]}
-    else
-        track=${matched_tracks[0]}
-        generate_track_details "$track"
+        track=${ascii_to_utf8_map["${matched_tracks[$(( index - 1 ))]}"]}
     fi
+}
+
+generate_ascii_to_utf8_mapping() {
+    for track in "${all_tracks[@]}"; do
+        echo "$track|$(convert_to_ascii "$track")"
+    done > "$ascii_to_utf8_mapfile"
+}
+
+convert_to_ascii() {
+    echo "$*" | sed -e 's/œ/oe/g' -e 's/[‐–—]/-/g' -e "s/[‘’]/'/g" -e 's/[“”]/"/g' | iconv -cf utf8 -t ascii//TRANSLIT
 }
 
 # As track list is already randomly sorted, just iterate through it
@@ -285,7 +305,7 @@ generate_track_details() {
 
     local fmt="default=noprint_wrappers=1:nokey=1"
     local ffprobe_opts
-    ffprobe_opts=( -v error -select_streams a -show_entries "stream=duration" -of "$fmt" "$ffprobe_track" )
+    ffprobe_opts=( -v fatal -select_streams a -show_entries "stream=duration" -of "$fmt" "$ffprobe_track" )
     local track_duration; track_duration=$("${ffprobe:?}" "${ffprobe_opts[@]}" | sed 's/\r//g')
     local track_duration_int; track_duration_int=$(grep -Eo "^[0-9]*" <<< "$track_duration")
     durations_map["$track"]=$track_duration_int
@@ -297,7 +317,8 @@ generate_track_details() {
     fi
     local mediainfo_output='General;%Artist%|%Album%|%Title%|%BitRate%|%Format%'
     local track_artist track_album track_title track_bitrate track_format
-    IFS='|' read -r track_artist track_album track_title track_bitrate track_format < <("${mediainfo:?}" --output="$mediainfo_output" "$mediainfo_track")
+    IFS='|' read -r track_artist track_album track_title track_bitrate track_format < \
+            <("${mediainfo:?}" --output="$mediainfo_output" "$mediainfo_track")
     max_length=30
 
     track_artist_ellipsized=$(ellipsize "$max_length" "$track_artist")
@@ -327,7 +348,6 @@ ellipsize() {
 # Create an original-quality clip and a lossy clip from a given track at the given timestamps
 # Obfuscate both original quality and lossy clips as .wav so it cannot easily be determined which is the X file
 create_clip() {
-    trap 'rm -f "$tmp_mp3"' RETURN
     if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
         local ffmpeg_track; ffmpeg_track=$(wslpath -w "$track")
         local ffmpeg_original_clip; ffmpeg_original_clip=$(wslpath -w "$original_clip")
@@ -657,9 +677,8 @@ async_cleanup() {
             sleep 0.1
         done
     done
-    rm -f "${original_clips[@]}" "${lossy_clips[@]}" "${tmp_mp3s[@]}" "$x_clip"
+    rm -f "${original_clips[@]}" "${lossy_clips[@]}" "${tmp_mp3s[@]}" "$tmp_output" "$x_clip"
 }
-
 
 config_file="$HOME/audio_abx_test.cfg"
 if [[ -f "$config_file" ]]; then
@@ -733,6 +752,11 @@ track_index=0
 original_clips=()
 lossy_clips=()
 tmp_mp3s=()
+
+ascii_to_utf8_mapfile=$(mktemp)
+declare -A ascii_to_utf8_map
+generate_ascii_to_utf8_mapping &
+ascii_mapping_pid=$!
 
 declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
 search_anyway=false
