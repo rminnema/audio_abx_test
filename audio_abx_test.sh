@@ -662,9 +662,9 @@ print_results() {
                 echo "Artist|Album|Title"
                 echo "${track_details_map["$track"]}"
             } | column -ts '|'
-            echo "Current bitrate: ${bitrate}bps"
         fi
         echo
+        echo "Bitrate: ${bitrate}bps"
         {
             echo "Number|Artist|Album|Track|Result|Guess"
             for result in "${results[@]}"; do
