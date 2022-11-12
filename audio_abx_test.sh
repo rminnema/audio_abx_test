@@ -108,8 +108,6 @@ select_program() {
             create_clip
             ;;
         T|t)
-            warn "Resetting score"
-            print_results
             reset_score
             ;;
         N|n)
@@ -173,8 +171,12 @@ add_result() {
 
 # Choose the MP3 bitrate for the lossy clip
 select_mp3_bitrate() {
+    clear
     start_numbered_options_list "Select a bitrate for MP3 compression of the lossy file."
-    for btrt in 320 256 128 112 96 64 32; do
+    if [[ "$last_bitrate" ]]; then
+        warn "Changing your bitrate will reset your score and progress."
+    fi
+    for btrt in 32 64 96 112 128 256 320; do
         if [[ "$bitrate" && "$btrt" == "${bitrate::-1}" ]]; then
             numbered_options_list_option "${GREEN}${btrt} kbps${NOCOLOR}"
         else
@@ -186,22 +188,21 @@ select_mp3_bitrate() {
         warn "Invalid selection: '$bitrate_selection'"
     done
     echo
-    last_bitrate=$bitrate
     case "$bitrate_selection" in
         1)
-            bitrate=320k ;;
+            bitrate=32k ;;
         2)
-            bitrate=256k ;;
+            bitrate=64k ;;
         3)
-            bitrate=128k ;;
+            bitrate=96k ;;
         4)
             bitrate=112k ;;
         5)
-            bitrate=96k ;;
+            bitrate=128k ;;
         6)
-            bitrate=64k ;;
+            bitrate=256k ;;
         7)
-            bitrate=32k ;;
+            bitrate=320k ;;
         8)
             read -rn4 -p "Bitrate (between 32k and 320k): " bitrate
             if ! [[ "$bitrate" =~ k ]]; then
@@ -221,15 +222,15 @@ select_mp3_bitrate() {
             errr "Input must be between 1 and $count" ;;
     esac
     if [[ -z "$last_bitrate" || "$bitrate" != "$last_bitrate" ]]; then
-        if [[ "$last_bitrate" ]]; then
-            warn "Resetting score"
-            print_results
-        fi
         reset_score
     fi
+    last_bitrate=$bitrate
 }
 
 reset_score() {
+    if [[ "$last_bitrate" ]]; then
+        print_results
+    fi
     accuracy=0
     correct=0
     incorrect=0
@@ -727,7 +728,6 @@ if [[ ! -d "$clips_dir" ]]; then
     errr "'$clips_dir' directory does not exist."
 fi
 
-clear
 for cmd in ffmpeg vlc mediainfo ffprobe; do
     cmd_set="$cmd=\$(command -v '$cmd.exe') || $cmd=\$(command -v '$cmd')"
     if ! eval "$cmd_set"; then
