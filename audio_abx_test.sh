@@ -66,8 +66,8 @@ select_program() {
     numbered_options_list_option "Change bitrate" "C"
     if (( ${#results[@]} > 0 )); then
         numbered_options_list_option "Print results" "P"
+        numbered_options_list_option "Reset score" "T"
     fi
-    numbered_options_list_option "Reset score" "T"
     numbered_options_list_option "Save clip" "S"
     numbered_options_list_option "Quit" "Q"
 
@@ -783,6 +783,7 @@ while true; do
         fi
         search_anyway=false
     else
+        unset search_string
         random_track
     fi
     if [[ "$search_string" ]]; then
