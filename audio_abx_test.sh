@@ -59,9 +59,9 @@ select_program() {
     numbered_options_list_option "Re-clip track" "R"
     if ! "$x_test_attempted" || "$x_test_completed"; then
         numbered_options_list_option "Next track" "N"
-    fi
-    if [[ "$random" =~ [Yy] ]]; then
-        numbered_options_list_option "Search next track" "F"
+        if [[ "$random" =~ [Yy] ]]; then
+            numbered_options_list_option "Search next track" "F"
+        fi
     fi
     numbered_options_list_option "Change bitrate" "C"
     if (( ${#results[@]} > 0 )); then
@@ -102,6 +102,9 @@ select_program() {
         P|p)
             print_results ;;
         F|f)
+            if ! "$x_test_attempted" && ! "$x_test_completed"; then
+                add_result skipped
+            fi
             search_anyway=true ;;
         C|c)
             select_mp3_bitrate
