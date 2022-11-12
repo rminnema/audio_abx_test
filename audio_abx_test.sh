@@ -109,9 +109,7 @@ select_program() {
             search_anyway=true ;;
         C|c)
             select_mp3_bitrate
-            prepare_create_clip
-            create_clip &
-            create_clip_pids+=( "$!" )
+            create_clip
             ;;
         T|t)
             warn "Resetting score"
@@ -155,9 +153,7 @@ select_program() {
                     return 1
                 fi
             fi
-            prepare_create_clip
-            create_clip &
-            create_clip_pids+=( "$!" )
+            create_clip
             ;;
         *)
             return 1 ;;
@@ -347,18 +343,21 @@ ellipsize() {
     fi
 }
 
-prepare_create_clip() {
+create_clip() {
     original_clips+=( "$(mktemp --suffix=.wav)" )
     original_clip=${original_clips[-1]}
     lossy_clips+=( "$(mktemp --suffix=.wav)" )
     lossy_clip=${lossy_clips[-1]}
     tmp_mp3s+=( "$(mktemp --suffix=.mp3)" )
     tmp_mp3=${tmp_mp3s[-1]}
+
+    create_clip_async &
+    create_clip_pids+=( "$!" )
 }
 
 # Create an original-quality clip and a lossy clip from a given track at the given timestamps
 # Obfuscate both original quality and lossy clips as .wav so it cannot easily be determined which is the X file
-create_clip() {
+create_clip_async() {
     if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
         local ffmpeg_track; ffmpeg_track=$(wslpath -w "$track")
         local ffmpeg_original_clip; ffmpeg_original_clip=$(wslpath -w "$original_clip")
@@ -792,9 +791,7 @@ while true; do
         random_timestamps || errr "Something went wrong with random timestamps"
     fi
 
-    prepare_create_clip
-    create_clip &
-    create_clip_pids+=( "$!" )
+    create_clip
 
     x_clip_quality=$(( RANDOM%2 ))
     x_test_attempted=false
