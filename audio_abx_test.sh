@@ -503,15 +503,15 @@ play_clip() {
         vlc_clip=$1
     fi
 
-    if kill -0 "${create_clip_pids[-1]}" 2>/dev/null; then
-        echo
-        info "Please wait while the encoding job finishes."
-        wait "${create_clip_pids[-1]}"
-    fi
     if kill -0 "$vlc_pid" 2>/dev/null; then
         echo
         info "You must close the current instance of VLC to open another one."
         wait "$vlc_pid"
+    fi
+    if kill -0 "${create_clip_pids[-1]}" 2>/dev/null; then
+        echo
+        info "Please wait while the encoding job finishes."
+        wait "${create_clip_pids[-1]}"
     fi
     "${vlc:?}" "$vlc_clip" &>/dev/null &
     vlc_pid=$!
