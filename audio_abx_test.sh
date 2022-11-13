@@ -174,7 +174,7 @@ add_result() {
 
 # Choose the MP3 bitrate for the lossy clip
 select_mp3_bitrate() {
-    clear
+    clear -x
     start_numbered_options_list "Select a bitrate for MP3 compression of the lossy file."
     if [[ "$last_bitrate" ]]; then
         warn "Changing your bitrate will reset your score and progress."
@@ -644,7 +644,7 @@ save_clip() {
 }
 
 print_clip_info() {
-    clear
+    clear -x
     echo "Clip information"
     echo "Artist: ${artists_map["$track"]}"
     echo "Album: ${albums_map["$track"]}"
@@ -659,7 +659,7 @@ print_clip_info() {
 print_results() {
     if (( ${#results[@]} > 0 )); then
         if [[ -z "$quit" ]]; then
-            clear
+            clear -x
             echo "Current track info:"
             {
                 echo "Artist|Album|Title"
