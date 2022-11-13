@@ -12,11 +12,6 @@ info() { printf "%sInfo:%s %s\n\n" "$BLUE" "$NOCOLOR" "$*" >&2; }
 
 main() {
     config_file="$HOME/audio_abx_test.cfg"
-    if [[ -f "$config_file" ]]; then
-        music_dir=$(awk -F '=' '/^music_dir=/ { print $2 }' "$config_file")
-        clips_dir=$(awk -F '=' '/^clips_dir=/ { print $2 }' "$config_file")
-    fi
-
     while (( $# > 0 )); do
         param=$1
         shift
@@ -29,10 +24,18 @@ main() {
                 clips_dir=$1
                 shift
                 ;;
+            --config_file)
+                config_file=$1
+                shift
+                ;;
             *)
                 errr "Unrecognized parameter '$param'"
         esac
     done
+    if [[ -f "$config_file" ]]; then
+        [[ "$music_dir" ]] || music_dir=$(awk -F '=' '/^music_dir=/ { print $2 }' "$config_file")
+        [[ "$clips_dir" ]] || clips_dir=$(awk -F '=' '/^clips_dir=/ { print $2 }' "$config_file")
+    fi
 
     if [[ ! -d "$music_dir" ]]; then
         errr "'$music_dir' directory does not exist."
