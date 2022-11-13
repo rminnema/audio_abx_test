@@ -689,9 +689,6 @@ show_results_and_cleanup() {
 }
 
 async_cleanup() {
-    while kill -0 "$" 2>/dev/null || kill -0 "$vlc_pid" 2>/dev/null; do
-        sleep 0.1
-    done
     for pid in "${create_clip_pids[@]}" "$vlc_pid"; do
         while kill -0 "$pid" 2>/dev/null; do
             sleep 0.1
