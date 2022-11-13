@@ -10,6 +10,127 @@ errr() { printf "%sERROR:%s %s\n\n" "$RED" "$NOCOLOR" "$*" >&2; exit 1; }
 warn() { printf "%sWARNING:%s %s\n\n" "$YELLOW" "$NOCOLOR" "$*" >&2; }
 info() { printf "%sInfo:%s %s\n\n" "$BLUE" "$NOCOLOR" "$*" >&2; }
 
+main() {
+    config_file="$HOME/audio_abx_test.cfg"
+    if [[ -f "$config_file" ]]; then
+        music_dir=$(awk -F '=' '/^music_dir=/ { print $2 }' "$config_file")
+        clips_dir=$(awk -F '=' '/^clips_dir=/ { print $2 }' "$config_file")
+    fi
+
+    while (( $# > 0 )); do
+        param=$1
+        shift
+        case "$param" in
+            --music_dir)
+                music_dir=$1
+                shift
+                ;;
+            --clips_dir)
+                clips_dir=$1
+                shift
+                ;;
+            *)
+                errr "Unrecognized parameter '$param'"
+        esac
+    done
+
+    if [[ ! -d "$music_dir" ]]; then
+        errr "'$music_dir' directory does not exist."
+    fi
+
+    if [[ ! -d "$clips_dir" ]]; then
+        errr "'$clips_dir' directory does not exist."
+    fi
+
+    for cmd in ffmpeg vlc mediainfo ffprobe; do
+        cmd_set="$cmd=\$(command -v '$cmd.exe') || $cmd=\$(command -v '$cmd')"
+        if ! eval "$cmd_set"; then
+            warn "'$cmd' was not found"
+        fi
+    done
+
+    select_mp3_bitrate
+    trap show_results_and_cleanup EXIT
+
+    start_numbered_options_list "Fully random song and timestamp selection"
+    numbered_options_list_option "Yes" "Y"
+    numbered_options_list_option "No" "N"
+    while ! random=$(user_selection "Selection: "); do
+        warn "Invalid selection: '$random'"
+    done
+    echo
+
+    start_numbered_options_list "Source file quality selection"
+    numbered_options_list_option "Lossless only" "L"
+    numbered_options_list_option "Mixed lossy/lossless" "M"
+    while ! source_quality=$(user_selection "Selection: "); do
+        warn "Invalid selection: '$source_quality'"
+    done
+    echo
+
+    if [[ "$source_quality" =~ [Ll] ]]; then
+        mapfile -t all_tracks < <(find "$music_dir" -type f -iname "*.flac" | sort -R)
+    else
+        mapfile -t all_tracks < <(find "$music_dir" -type f -a \( -iname "*.flac" -o -iname "*.m4a" -o -iname "*.mp3" \) | sort -R)
+    fi
+
+    if (( ${#all_tracks[@]} == 0 )); then
+        errr "No tracks were found in '$music_dir'"
+    fi
+
+    track_index=0
+    original_clips=()
+    lossy_clips=()
+    tmp_mp3s=()
+
+    ascii_to_utf8_mapfile=$(mktemp)
+    declare -A ascii_to_utf8_map
+    generate_ascii_to_utf8_mapping &
+    ascii_mapping_pid=$!
+
+    declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
+    search_anyway=false
+    while true; do
+        if (( ${#create_clip_pids[@]} > 0 )); then
+            kill "${create_clip_pids[-1]}" 2>/dev/null
+        fi
+        if "$search_anyway" || ! [[ "$random" =~ [Yy] ]]; then
+            read -rp "Track search string: " search_string
+            if [[ -z "$search_string" ]]; then
+                random_track
+            elif ! track_search; then
+                continue
+            fi
+            search_anyway=false
+        else
+            unset search_string
+            random_track
+        fi
+        if [[ "$search_string" ]]; then
+            user_timestamps || errr "Something went wrong with user timestamps"
+        else
+            random_timestamps || errr "Something went wrong with random timestamps"
+        fi
+
+        create_clip
+
+        x_clip_quality=$(( RANDOM%2 ))
+        x_test_attempted=false
+        x_test_completed=false
+        while true; do
+            print_clip_info
+            while ! select_program; do
+                warn "Invalid selection '$program_selection'"
+                read -rsp "Press enter to continue:" _
+                print_clip_info
+            done
+            if [[ "$program_selection" =~ [NnFf] ]]; then
+                break
+            fi
+        done
+    done
+}
+
 # Reset parameters for numbered options list
 start_numbered_options_list() {
     echo "$*"
@@ -697,121 +818,4 @@ async_cleanup() {
     rm -f "${original_clips[@]}" "${lossy_clips[@]}" "${tmp_mp3s[@]}" "$tmp_output" "$x_clip"
 }
 
-config_file="$HOME/audio_abx_test.cfg"
-if [[ -f "$config_file" ]]; then
-    music_dir=$(awk -F '=' '/^music_dir=/ { print $2 }' "$config_file")
-    clips_dir=$(awk -F '=' '/^clips_dir=/ { print $2 }' "$config_file")
-fi
-
-while (( $# > 0 )); do
-    param=$1
-    shift
-    case "$param" in
-        --music_dir)
-            music_dir=$1
-            shift
-            ;;
-        --clips_dir)
-            clips_dir=$1
-            shift
-            ;;
-        *)
-            errr "Unrecognized parameter '$param'"
-    esac
-done
-
-if [[ ! -d "$music_dir" ]]; then
-    errr "'$music_dir' directory does not exist."
-fi
-
-if [[ ! -d "$clips_dir" ]]; then
-    errr "'$clips_dir' directory does not exist."
-fi
-
-for cmd in ffmpeg vlc mediainfo ffprobe; do
-    cmd_set="$cmd=\$(command -v '$cmd.exe') || $cmd=\$(command -v '$cmd')"
-    if ! eval "$cmd_set"; then
-        warn "'$cmd' was not found"
-    fi
-done
-
-select_mp3_bitrate
-trap show_results_and_cleanup EXIT
-
-start_numbered_options_list "Fully random song and timestamp selection"
-numbered_options_list_option "Yes" "Y"
-numbered_options_list_option "No" "N"
-while ! random=$(user_selection "Selection: "); do
-    warn "Invalid selection: '$random'"
-done
-echo
-
-start_numbered_options_list "Source file quality selection"
-numbered_options_list_option "Lossless only" "L"
-numbered_options_list_option "Mixed lossy/lossless" "M"
-while ! source_quality=$(user_selection "Selection: "); do
-    warn "Invalid selection: '$source_quality'"
-done
-echo
-
-if [[ "$source_quality" =~ [Ll] ]]; then
-    mapfile -t all_tracks < <(find "$music_dir" -type f -iname "*.flac" | sort -R)
-else
-    mapfile -t all_tracks < <(find "$music_dir" -type f -a \( -iname "*.flac" -o -iname "*.m4a" -o -iname "*.mp3" \) | sort -R)
-fi
-
-if (( ${#all_tracks[@]} == 0 )); then
-    errr "No tracks were found in '$music_dir'"
-fi
-
-track_index=0
-original_clips=()
-lossy_clips=()
-tmp_mp3s=()
-
-ascii_to_utf8_mapfile=$(mktemp)
-declare -A ascii_to_utf8_map
-generate_ascii_to_utf8_mapping &
-ascii_mapping_pid=$!
-
-declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
-search_anyway=false
-while true; do
-    if (( ${#create_clip_pids[@]} > 0 )); then
-        kill "${create_clip_pids[-1]}" 2>/dev/null
-    fi
-    if "$search_anyway" || ! [[ "$random" =~ [Yy] ]]; then
-        read -rp "Track search string: " search_string
-        if [[ -z "$search_string" ]]; then
-            random_track
-        elif ! track_search; then
-            continue
-        fi
-        search_anyway=false
-    else
-        unset search_string
-        random_track
-    fi
-    if [[ "$search_string" ]]; then
-        user_timestamps || errr "Something went wrong with user timestamps"
-    else
-        random_timestamps || errr "Something went wrong with random timestamps"
-    fi
-
-    create_clip
-
-    x_clip_quality=$(( RANDOM%2 ))
-    x_test_attempted=false
-    x_test_completed=false
-    while true; do
-        print_clip_info
-        while ! select_program; do
-            warn "Invalid selection '$program_selection'"
-            read -rsp "Press enter to continue:" _
-            print_clip_info
-        done
-        if [[ "$program_selection" =~ [NnFf] ]]; then
-            break
-        fi
-    done
-done
+main "$@"
