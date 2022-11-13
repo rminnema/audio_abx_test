@@ -78,7 +78,8 @@ main() {
     if [[ "$source_quality" =~ [Ll] ]]; then
         mapfile -t all_tracks < <(find "$music_dir" -type f -iname "*.flac" | sort -R)
     else
-        mapfile -t all_tracks < <(find "$music_dir" -type f -a \( -iname "*.flac" -o -iname "*.m4a" -o -iname "*.mp3" \) | sort -R)
+        mapfile -t all_tracks < \
+            <(find "$music_dir" -type f -a \( -iname "*.flac" -o -iname "*.m4a" -o -iname "*.mp3" \) | sort -R)
     fi
 
     if (( ${#all_tracks[@]} == 0 )); then
@@ -379,7 +380,7 @@ track_search() {
         wait "$ascii_mapping_pid"
     fi
     if [[ -f "$ascii_to_utf8_mapfile" ]]; then
-        while IFS='|' read -r utf8 ascii; do
+        while IFS='|' read -r ascii utf8; do
             ascii_to_utf8_map["$ascii"]=$utf8
         done < "$ascii_to_utf8_mapfile"
         rm "$ascii_to_utf8_mapfile"
@@ -399,7 +400,7 @@ track_search() {
             track=${ascii_to_utf8_map["${matched_tracks[$i]}"]}
             generate_track_details "$track"
             duration_sec=${durations_map["$track"]}
-            duration_str=$(date -u --date="@$duration_sec" +%H:%M:%S | sed -r 's/00:([0-9]{2}:[0-9]{2})/\1/g')
+            duration_str=$(date -u --date="@$duration_sec" +%H:%M:%S | rm_00_hrs)
             track_info=${track_details_map["$track"]}
             tracks_list+=( "$track_info|$duration_str" )
         done
@@ -423,13 +424,10 @@ track_search() {
 }
 
 generate_ascii_to_utf8_mapping() {
-    for track in "${all_tracks[@]}"; do
-        echo "$track|$(convert_to_ascii "$track")"
+    for utf8_track in "${all_tracks[@]}"; do
+        ascii_track=$(iconv -cf utf8 -t ascii//TRANSLIT <<< "$utf8_track")
+        echo "$ascii_track|$utf8_track"
     done > "$ascii_to_utf8_mapfile"
-}
-
-convert_to_ascii() {
-    echo "$*" | sed -e 's/œ/oe/g' -e 's/[‐–—]/-/g' -e "s/[‘’]/'/g" -e 's/[“”]/"/g' | iconv -cf utf8 -t ascii//TRANSLIT
 }
 
 # As track list is already randomly sorted, just iterate through it
@@ -534,10 +532,14 @@ random_timestamps() {
     sanitize_timestamps
 }
 
+rm_00_hrs() {
+    sed -r 's/00:?([0-9]{2}:?[0-9]{2})/\1/g'
+}
+
 # Prompt the user for timestamps to use for clipping
 user_timestamps() {
     unset startsec endsec
-    info "Track duration: $(date -u --date=@"${durations_map["$track"]}" +%H:%M:%S | sed -r 's/00:([0-9]{2}:[0-9]{2})/\1/g')"
+    info "Track duration: $(date -u --date=@"${durations_map["$track"]}" +%H:%M:%S | rm_00_hrs)"
     while [[ -z "$startsec" ]]; do
         read -rp "Start timestamp: " startts
         if [[ -z "$startts" || "$startts" =~ ^[Rr]$ ]]; then
@@ -738,8 +740,8 @@ save_clip() {
     else
         local file_fmt=flac
     fi
-    start_ts=$(date -u --date=@"$startsec" +%H%M%S | sed -r 's/00([0-9]{4})/\1/g')
-    end_ts=$(date -u --date=@"$endsec" +%H%M%S | sed -r 's/00([0-9]{4})/\1/g')
+    start_ts=$(date -u --date=@"$startsec" +%H%M%S | rm_00_hrs)
+    end_ts=$(date -u --date=@"$endsec" +%H%M%S | rm_00_hrs)
     local save_file="$clips_dir/$save_file_basename -- $compression.$start_ts.$end_ts.$file_fmt"
 
     if kill -0 "${create_clip_pids[-1]}" 2>/dev/null; then
@@ -779,7 +781,7 @@ print_clip_info() {
     echo "Title: ${titles_map["$track"]}"
     echo "Avg. Bitrate: ${bitrate_map["$track"]} kbps"
     echo "Format: ${format_map["$track"]}"
-    echo "$(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)" | sed -r 's/00:([0-9]{2}:[0-9]{2})/\1/g'
+    echo "$(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)" | rm_00_hrs
 }
 
 # Generate a printout of the results, showing all tracks that have been presented so far
@@ -822,7 +824,7 @@ async_cleanup() {
             sleep 0.1
         done
     done
-    rm -f "${original_clips[@]}" "${lossy_clips[@]}" "${tmp_mp3s[@]}" "$tmp_output" "$x_clip"
+    rm -f "${original_clips[@]}" "${lossy_clips[@]}" "${tmp_mp3s[@]}" "$tmp_output" "$x_clip" "$ascii_to_utf8_mapfile"
 }
 
 main "$@"
