@@ -45,12 +45,16 @@ main() {
         errr "'$clips_dir' directory does not exist."
     fi
 
+    cmds_notfound=()
     for cmd in ffmpeg vlc mediainfo ffprobe; do
         cmd_set="$cmd=\$(command -v '$cmd.exe') || $cmd=\$(command -v '$cmd')"
         if ! eval "$cmd_set"; then
-            warn "'$cmd' was not found"
+            cmnds_notfound+=( "$cmd" )
         fi
     done
+    if (( ${#cmnds_notfound[@]} > 0 )); then
+        errr "At least one command was not found: ${cmnds_notfound[*]}"
+    fi
 
     select_mp3_bitrate
     trap show_results_and_cleanup EXIT
