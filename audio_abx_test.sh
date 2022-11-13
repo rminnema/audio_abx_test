@@ -11,6 +11,7 @@ warn() { printf "%sWARNING:%s %s\n\n" "$YELLOW" "$NOCOLOR" "$*" >&2; }
 info() { printf "%sInfo:%s %s\n\n" "$BLUE" "$NOCOLOR" "$*" >&2; }
 
 main() {
+    max_field_length=$(( ($(tput cols) - 32)/3 ))
     config_file="$HOME/audio_abx_test.cfg"
     while (( $# > 0 )); do
         param=$1
@@ -75,11 +76,12 @@ main() {
     done
     echo
 
+    lossless_regex='.*\.(flac|alac|wav|aiff)'
+    allmusic_regex='.*\.(flac|alac|wav|aiff|mp3|m4a|aac|ogg|opus|wma)'
     if [[ "$source_quality" =~ [Ll] ]]; then
-        mapfile -t all_tracks < <(find "$music_dir" -type f -iname "*.flac" | sort -R)
+        mapfile -t all_tracks < <(find "$music_dir" -type f -regextype egrep -iregex "$lossless_regex")
     else
-        mapfile -t all_tracks < \
-            <(find "$music_dir" -type f -a \( -iname "*.flac" -o -iname "*.m4a" -o -iname "*.mp3" \) | sort -R)
+        mapfile -t all_tracks < <(find "$music_dir" -type f -regextype egrep -iregex "$allmusic_regex")
     fi
 
     if (( ${#all_tracks[@]} == 0 )); then
@@ -90,11 +92,7 @@ main() {
     original_clips=()
     lossy_clips=()
     tmp_mp3s=()
-
-    ascii_to_utf8_mapfile=$(mktemp)
-    declare -A ascii_to_utf8_map
-    generate_ascii_to_utf8_mapping &
-    ascii_mapping_pid=$!
+    mapfile -t random_order < <(shuf -i 0-$(( ${#all_tracks[@]} - 1 )) --random-source=/dev/urandom)
 
     declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
     search_anyway=false
@@ -375,32 +373,23 @@ track_search() {
         tmp_output=$(mktemp)
     fi
 
-    if kill -0 "$ascii_mapping_pid" 2>/dev/null; then
-        info "Please wait while the conversion of UTF8 filenames to ASCII is done"
-        wait "$ascii_mapping_pid"
-    fi
-    if [[ -f "$ascii_to_utf8_mapfile" ]]; then
-        while IFS='|' read -r ascii utf8; do
-            ascii_to_utf8_map["$ascii"]=$utf8
-        done < "$ascii_to_utf8_mapfile"
-        rm "$ascii_to_utf8_mapfile"
-    fi
     echo
-    mapfile -t matched_tracks < <(IFS=$'\n'; grep -Ei "[^/]*${search_string}[^/]*$" <<< "${!ascii_to_utf8_map[*]}")
-    if (( ${#matched_tracks[@]} == 0 )); then
+    mapfile -t matched_track_indices < <(IFS=$'\n'; iconv -f utf8 -t ascii//TRANSLIT <<< "${all_tracks[*]}" |
+            grep -Ein "[^/]*${search_string}[^/]*$" | awk -F ':' '{ print $1 }')
+    if (( ${#matched_track_indices[@]} == 0 )); then
         info "No tracks matched"
         return 1
-    elif (( ${#matched_tracks[@]} > 20 )); then
-        info "Too many tracks matched"
-        return 1
+    #elif (( ${#matched_track_indices[@]} > 20 )); then
+    #    info "Too many tracks matched"
+    #    return 1
     else
         info "Select the desired track below:"
         tracks_list=()
-        for i in "${!matched_tracks[@]}"; do
-            track=${ascii_to_utf8_map["${matched_tracks[$i]}"]}
+        for i in "${matched_track_indices[@]}"; do
+            track=${all_tracks[$(( i - 1 ))]}
             generate_track_details "$track"
             duration_sec=${durations_map["$track"]}
-            duration_str=$(date -u --date="@$duration_sec" +%H:%M:%S | rm_00_hrs)
+            duration_str=$(date -u --date=@"$duration_sec" +%H:%M:%S | rm_00_hrs)
             track_info=${track_details_map["$track"]}
             tracks_list+=( "$track_info|$duration_str" )
         done
@@ -419,22 +408,16 @@ track_search() {
         if [[ "$index" == "$count" ]]; then
             return 1
         fi
-        track=${ascii_to_utf8_map["${matched_tracks[$(( index - 1 ))]}"]}
+        track=${all_tracks[$(( ${matched_track_indices[$(( index - 1 ))]} - 1 ))]}
     fi
-}
-
-generate_ascii_to_utf8_mapping() {
-    for utf8_track in "${all_tracks[@]}"; do
-        ascii_track=$(iconv -cf utf8 -t ascii//TRANSLIT <<< "$utf8_track")
-        echo "$ascii_track|$utf8_track"
-    done > "$ascii_to_utf8_mapfile"
 }
 
 # As track list is already randomly sorted, just iterate through it
 random_track() {
-    track="${all_tracks[$(( track_index++ ))]}"
+    random_index=${random_order[$track_index]}
+    track=${all_tracks[$random_index]}
     generate_track_details "$track"
-    if (( track_index >= ${#all_tracks[@]} )); then
+    if (( ++track_index >= ${#all_tracks[@]} )); then
         track_index=0
     fi
 }
@@ -462,14 +445,12 @@ generate_track_details() {
     local track_artist track_album track_title track_bitrate track_format
     IFS='|' read -r track_artist track_album track_title track_bitrate track_format < \
             <("${mediainfo:?}" --output="$mediainfo_output" "$mediainfo_track")
-    max_length=30
 
-    track_artist_ellipsized=$(ellipsize "$max_length" "$track_artist")
-    track_album_ellipsized=$(ellipsize "$max_length" "$track_album")
-    track_title_ellipsized=$(ellipsize "$max_length" "$track_title")
+    track_artist_ellipsized=$(ellipsize "$track_artist")
+    track_album_ellipsized=$(ellipsize "$track_album")
+    track_title_ellipsized=$(ellipsize "$track_title")
 
-    local track_details="$track_artist_ellipsized|$track_album_ellipsized|$track_title_ellipsized"
-    track_details_map["$track"]=$track_details
+    track_details_map["$track"]="$track_artist_ellipsized|$track_album_ellipsized|$track_title_ellipsized"
     artists_map["$track"]=$track_artist
     albums_map["$track"]=$track_album
     titles_map["$track"]=$track_title
@@ -478,11 +459,9 @@ generate_track_details() {
 }
 
 ellipsize() {
-    len=$1
-    shift
     str=$*
-    if (( ${#str} > len + 3 )); then
-        cut -c 1-"$len" <<< "$str" | sed -e 's/\s*$//' -e 's/$/.../'
+    if (( ${#str} > max_field_length + 3 )); then
+        cut -c 1-"$max_field_length" <<< "$str" | sed -e 's/\s*$//' -e 's/$/.../'
     else
         echo "$str"
     fi
@@ -825,7 +804,7 @@ async_cleanup() {
             sleep 0.1
         done
     done
-    rm -f "${original_clips[@]}" "${lossy_clips[@]}" "${tmp_mp3s[@]}" "$tmp_output" "$x_clip" "$ascii_to_utf8_mapfile"
+    rm -f "${original_clips[@]}" "${lossy_clips[@]}" "${tmp_mp3s[@]}" "$tmp_output" "$x_clip"
 }
 
 main "$@"
