@@ -379,9 +379,9 @@ track_search() {
     if (( ${#matched_track_indices[@]} == 0 )); then
         info "No tracks matched"
         return 1
-    #elif (( ${#matched_track_indices[@]} > 20 )); then
-    #    info "Too many tracks matched"
-    #    return 1
+    elif (( ${#matched_track_indices[@]} > 20 )); then
+        info "Too many tracks matched"
+        return 1
     else
         info "Select the desired track below:"
         tracks_list=()
