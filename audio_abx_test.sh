@@ -45,7 +45,7 @@ main() {
         errr "'$clips_dir' directory does not exist."
     fi
 
-    cmds_notfound=()
+    cmnds_notfound=()
     for cmd in ffmpeg vlc mediainfo ffprobe; do
         cmd_set="$cmd=\$(command -v '$cmd.exe') || $cmd=\$(command -v '$cmd')"
         if ! eval "$cmd_set"; then
