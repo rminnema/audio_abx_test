@@ -781,7 +781,8 @@ print_clip_info() {
     echo "Title: ${titles_map["$track"]}"
     echo "Avg. Bitrate: ${bitrate_map["$track"]} kbps"
     echo "Format: ${format_map["$track"]}"
-    echo "$(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)" | rm_00_hrs
+    echo "Track duration: $(date -u --date="@${durations_map["$track"]}" +%H:%M:%S | rm_00_hrs)"
+    echo "Clip from $(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)" | rm_00_hrs
 }
 
 # Generate a printout of the results, showing all tracks that have been presented so far
