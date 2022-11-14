@@ -13,7 +13,8 @@ info() { printf "%sInfo:%s %s\n\n" "$BLUE" "$NOCOLOR" "$*" >&2; }
 
 # Main program logic
 main() {
-    max_field_length=$(( ($(tput cols) - 32)/3 ))
+    term_width=$(tput cols)
+    max_field_length=$(( (term_width - 32)/3 ))
     config_file="$HOME/audio_abx_test.cfg"
     while (( $# > 0 )); do
         param=$1
@@ -76,7 +77,7 @@ main() {
 
     lossless_regex='.*\.(flac|alac|wav|aiff)'
     allmusic_regex='.*\.(flac|alac|wav|aiff|mp3|m4a|aac|ogg|opus|wma)'
-    if [[ "$source_quality" =~ [Ll] ]]; then
+    if [[ "$source_quality" =~ ^[Ll]$ ]]; then
         mapfile -t all_tracks < <(find "$music_dir" -type f -regextype egrep -iregex "$lossless_regex")
     else
         mapfile -t all_tracks < <(find "$music_dir" -type f -regextype egrep -iregex "$allmusic_regex")
@@ -90,7 +91,8 @@ main() {
     original_clips=()
     lossy_clips=()
     tmp_mp3s=()
-    mapfile -t random_order < <(shuf -i 0-$(( ${#all_tracks[@]} - 1 )) --random-source=/dev/urandom)
+    max_idx=$(( ${#all_tracks[@]} - 1 ))
+    mapfile -t random_order < <(shuf -i 0-"$max_idx" --random-source=/dev/urandom)
 
     declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
     search_anyway=false
@@ -98,7 +100,7 @@ main() {
         if (( ${#create_clip_pids[@]} > 0 )); then
             kill "${create_clip_pids[-1]}" 2>/dev/null
         fi
-        if "$search_anyway" || ! [[ "$random" =~ [Yy] ]]; then
+        if "$search_anyway" || [[ ! "$random" =~ ^[Yy]$ ]]; then
             read -rp "Track search string: " search_string
             if [[ -z "$search_string" ]]; then
                 random_track
@@ -128,7 +130,7 @@ main() {
                 read -rsp "Press enter to continue:" _
                 print_clip_info
             done
-            if [[ "$program_selection" =~ [NnFf] ]]; then
+            if [[ "$program_selection" =~ ^[NnFf]$ ]]; then
                 break
             fi
         done
@@ -156,10 +158,8 @@ numbered_options_list_option() {
 
 # Prompts the user for input and validates against provided options
 user_selection() {
-    local prompt=$1
-    shift
     local selection
-    read -rp "$prompt" selection
+    read -rp "$1" selection
     for option in $(seq "$count") "${options[@]^^}" "${options[@],,}"; do
         if [[ "$selection" == "$option" ]]; then
             if [[ "$selection" =~ ^[0-9]+$ ]] && (( selection >= 1 && selection <= count && ${#options[@]} > 0 )); then
@@ -184,7 +184,7 @@ select_program() {
     numbered_options_list_option "Re-clip track" "R"
     if ! "$x_test_attempted" || "$x_test_completed"; then
         numbered_options_list_option "Next track" "N"
-        if [[ "$random" =~ [Yy] ]]; then
+        if [[ "$random" =~ ^[Yy]$ ]]; then
             numbered_options_list_option "Search next track" "F"
         fi
     fi
@@ -260,7 +260,7 @@ select_program() {
                 warn "Invalid selection: '$timestamp_selection'"
             done
             echo
-            if [[ "$timestamp_selection" =~ [Mm] ]]; then
+            if [[ "$timestamp_selection" =~ ^[Mm]$ ]]; then
                 user_timestamps
             else
                 if ! random_timestamps; then
@@ -335,10 +335,10 @@ select_mp3_bitrate() {
             bitrate=320k ;;
         8)
             read -rn4 -p "Bitrate (between 32k and 320k): " bitrate
-            if ! [[ "$bitrate" =~ k ]]; then
+            if [[ ! "$bitrate" =~ k ]]; then
                 bitrate+=k
             fi
-            if ! [[ "$bitrate" =~ ^[0-9]+k$ ]]; then
+            if [[ ! "$bitrate" =~ ^[0-9]+k$ ]]; then
                 errr "You must provide a bitrate in the standard format"
             fi
             if (( ${bitrate::-1} < 32 )); then
@@ -388,8 +388,7 @@ track_search() {
         for i in "${matched_track_indices[@]}"; do
             track=${all_tracks[$(( i - 1 ))]}
             generate_track_details "$track"
-            duration_sec=${durations_map["$track"]}
-            duration_str=$(date -u --date=@"$duration_sec" +%H:%M:%S | rm_00_hrs)
+            duration_str=$(seconds_to_timespec "${durations_map["$track"]}")
             track_info=${track_details_map["$track"]}
             tracks_list+=( "$track_info|$duration_str" )
         done
@@ -402,13 +401,14 @@ track_search() {
             numbered_options_list_option "Select a new track"
         } > "$tmp_output"
         column -ts '|' "$tmp_output"
-        while ! index=$(user_selection "Selection: "); do
-            warn "Invalid selection: $index"
+        while ! track_selection=$(user_selection "Selection: "); do
+            warn "Invalid selection: $track_selection"
         done
-        if [[ "$index" == "$count" ]]; then
+        if [[ "$track_selection" == "$count" ]]; then
             return 1
         fi
-        track=${all_tracks[$(( ${matched_track_indices[$(( index - 1 ))]} - 1 ))]}
+        selected_track_index=$(( ${matched_track_indices[$(( track_selection - 1 ))]} - 1 ))
+        track=${all_tracks[$selected_track_index]}
     fi
 }
 
@@ -511,65 +511,63 @@ random_timestamps() {
     sanitize_timestamps
 }
 
-rm_00_hrs() {
-    sed -r 's/00:?([0-9]{2}:?[0-9]{2})/\1/g'
+# Convert seconds to a string in the form of HH:MM:SS for HH > 00 or else MM:SS
+seconds_to_timespec() {
+    date -u --date=@"$1" +%H:%M:%S | sed -r 's/00:?([0-9]{2}:?[0-9]{2})/\1/g'
 }
 
 # Prompt the user for timestamps to use for clipping
 user_timestamps() {
     unset startsec endsec
-    info "Track duration: $(date -u --date=@"${durations_map["$track"]}" +%H:%M:%S | rm_00_hrs)"
+    local startts endts
+    info "Track duration: $(seconds_to_timespec "${durations_map["$track"]}")"
     while [[ -z "$startsec" ]]; do
         read -rp "Start timestamp: " startts
         if [[ -z "$startts" || "$startts" =~ ^[Rr]$ ]]; then
             info "Selecting random timestamp for a 30 second clip"
             random_timestamps
+            return 0
         else
-            startsec=$(parse_timespec_to_seconds "$startts")
+            startsec=$(parse_time_to_seconds "$startts") || unset startsec
         fi
     done
 
     while [[ -z "$endsec" ]]; do
         read -rp "End timestamp: " endts
-        endsec=$(parse_timespec_to_seconds "$endts")
+        if [[ -z "$endts" ]]; then
+            endsec=$(( startsec + 30 ))
+        else
+            endsec=$(parse_time_to_seconds "$endts") || unset endsec
+        fi
     done
 
     sanitize_timestamps
     echo
 }
 
-# Convert a time specification like hours:minutes:seconds, minutes:seconds, or just seconds.
-# Also allow for fractional seconds through decimals on the seconds or by giving time in ms or us
-parse_timespec_to_seconds() {
+# Convert a time given in [[HH:]MM:]SS to seconds
+# Also convert times 'date' understands like "5 minutes 32 seconds"
+parse_time_to_seconds() {
     local timespec=$1
-
-    if ! grep -Eq -- "^(([0-9]{1,2}:){0,2}[0-9]{1,2}(\.[0-9]+)?|[0-9]+(\.[0-9]+)?((u|m)?s)?)$" <<< "$timespec"; then
-        warn "Invalid timespec '$timespec'!"
-        return 1
+    if [[ "$timespec" =~ ^[0-9:]*$ ]]; then
+        local seconds minutes hours
+        read -r seconds minutes hours _ < <(awk -F ':' '{ for (i=NF;i>0;i--) printf("%s ",$i)}' <<< "$timespec")
+        seconds=${seconds:-0}
+        minutes=${minutes:-0}
+        hours=${hours:-0}
+        if (( 10#$seconds > 59 )); then
+            minutes=$(( minutes + 1 ))
+            seconds=$(( seconds - 60 ))
+        fi
+        if (( 10#$minutes > 59 )); then
+            hours=$(( hours + 1 ))
+            minutes=$(( minutes - 60 ))
+        fi
+        awk -v s="$seconds" -v m="$minutes" -v h="$hours" 'BEGIN { printf("%s",s + 60*m + 60*60*h) }'
+    else
+        # Hope the user gave the time in some other format date understands
+        date -u --date="January 1 1970 + $timespec" +%s
     fi
-
-    local seconds minutes hours
-    read -r seconds minutes hours < <(awk -F ':' '{ for (i=NF;i>0;i--) printf("%s ",$i)}' <<< "$timespec")
-    if [[ "$seconds" =~ ms ]]; then
-        seconds=$(sed 's/[^0-9]//g' <<< "$seconds" | awk '{ printf("%f", $0 / 10**3 ) }')
-    elif [[ "$seconds" =~ us ]]; then
-        seconds=$(sed 's/[^0-9]//g' <<< "$seconds" | awk '{ printf("%f", $0 / 10**6 ) }')
-    fi
-    local integer_seconds; integer_seconds=$(awk -F '.' '{ print $1 }' <<< "$seconds")
-    local fractional_seconds; fractional_seconds=$(awk -F '.' '{ print $2 }' <<< "$seconds" | sed 's/0*$//')
-    if (( 10#$integer_seconds > 59 )); then
-        minutes=$(( minutes + 1 ))
-        integer_seconds=$(( seconds - 60 ))
-    fi
-    if (( 10#$minutes > 59 )); then
-        hours=$(( hours + 1 ))
-        minutes=$(( minutes - 60 ))
-    fi
-    seconds="$(awk -v s="$integer_seconds" -v m="$minutes" -v h="$hours" 'BEGIN { printf("%s",s + 60*m + 60*60*h) }')"
-    if [[ "$fractional_seconds" ]]; then
-        seconds+=".$fractional_seconds"
-    fi
-    echo "$seconds"
 }
 
 # Ensure that timestamps are valid
@@ -637,9 +635,9 @@ x_test() {
         warn "Invalid selection: '$retry_guess_forfeit'"
         echo
     done
-    if [[ "$retry_guess_forfeit" =~ [Rr] ]]; then
+    if [[ "$retry_guess_forfeit" =~ ^[Rr]$ ]]; then
         return 0
-    elif [[ "$retry_guess_forfeit" =~ [Ff] ]]; then
+    elif [[ "$retry_guess_forfeit" =~ ^[Ff]$ ]]; then
         forfeit=true
         echo
         info "You forfeited. The file was ${format^^}"
@@ -647,7 +645,7 @@ x_test() {
     fi
     if ! "$forfeit"; then
         unset confirmation
-        while ! [[ "$confirmation" =~ [Yy] ]]; do
+        while [[ ! "$confirmation" =~ ^[Yy]$ ]]; do
             echo
             start_numbered_options_list "Which did you just hear?"
             numbered_options_list_option "Original quality" "O"
@@ -663,7 +661,7 @@ x_test() {
                 warn "Invalid selection: '$confirmation'"
             done
         done
-        if [[ "$guess" =~ [Oo] ]]; then
+        if [[ "$guess" =~ ^[Oo]$ ]]; then
             guess_fmt=original
         else
             guess_fmt=lossy
@@ -707,20 +705,20 @@ save_clip() {
     local album=${albums_map["$track"]}
     local title=${titles_map["$track"]}
     local save_file_basename && save_file_basename=$(sed 's/\//-/g' <<< "$artist -- $album -- $title")
-    if [[ "$save_choice_1" =~ [Oo] ]]; then
+    if [[ "$save_choice_1" =~ ^[Oo]$ ]]; then
         local compression=original
         local clip_to_save="$original_clip"
     else
         local compression=lossy
         local clip_to_save="$lossy_clip"
     fi
-    if [[ "$save_choice_2" =~ [Ww] ]]; then
+    if [[ "$save_choice_2" =~ ^[Ww]$ ]]; then
         local file_fmt=wav
     else
         local file_fmt=flac
     fi
-    start_ts=$(date -u --date=@"$startsec" +%H%M%S | rm_00_hrs)
-    end_ts=$(date -u --date=@"$endsec" +%H%M%S | rm_00_hrs)
+    start_ts=$(seconds_to_timespec "$startsec" | tr -d ':')
+    end_ts=$(seconds_to_timespec "$endsec" | tr -d ':')
     local save_file="$clips_dir/$save_file_basename -- $compression.$start_ts.$end_ts.$file_fmt"
 
     if kill -0 "${create_clip_pids[-1]}" 2>/dev/null; then
@@ -760,8 +758,8 @@ print_clip_info() {
     echo "Title: ${titles_map["$track"]}"
     echo "Avg. Bitrate: ${bitrate_map["$track"]} kbps"
     echo "Format: ${format_map["$track"]}"
-    echo "Track duration: $(date -u --date="@${durations_map["$track"]}" +%H:%M:%S | rm_00_hrs)"
-    echo "Clip from $(date -u --date="@$startsec" +%H:%M:%S) - $(date -u --date="@$endsec" +%H:%M:%S)" | rm_00_hrs
+    echo "Track duration: $(seconds_to_timespec "${durations_map["$track"]}")"
+    echo "Clip from $(seconds_to_timespec "$startsec") - $(seconds_to_timespec "$endsec")"
 }
 
 # Generate a printout of the results, showing all tracks that have been presented so far
