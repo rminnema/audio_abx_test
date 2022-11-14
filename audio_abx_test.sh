@@ -6,10 +6,12 @@ readonly YELLOW=$'\E[33m'
 readonly BLUE=$'\E[34m'
 readonly NOCOLOR=$'\E[0m'
 
+# Functions for printing different message types to the terminal
 errr() { printf "%sERROR:%s %s\n\n" "$RED" "$NOCOLOR" "$*" >&2; exit 1; }
 warn() { printf "%sWARNING:%s %s\n\n" "$YELLOW" "$NOCOLOR" "$*" >&2; }
 info() { printf "%sInfo:%s %s\n\n" "$BLUE" "$NOCOLOR" "$*" >&2; }
 
+# Main program logic
 main() {
     max_field_length=$(( ($(tput cols) - 32)/3 ))
     config_file="$HOME/audio_abx_test.cfg"
@@ -40,10 +42,6 @@ main() {
 
     if [[ ! -d "$music_dir" ]]; then
         errr "'$music_dir' directory does not exist."
-    fi
-
-    if [[ ! -d "$clips_dir" ]]; then
-        errr "'$clips_dir' directory does not exist."
     fi
 
     cmnds_notfound=()
@@ -195,7 +193,9 @@ select_program() {
         numbered_options_list_option "Print results" "P"
         numbered_options_list_option "Reset score" "T"
     fi
-    numbered_options_list_option "Save clip" "S"
+    if [[ -d "$clips_dir" ]]; then
+        numbered_options_list_option "Save clip" "S"
+    fi
     numbered_options_list_option "Quit" "Q"
 
     while ! program_selection=$(user_selection "Selection: "); do
@@ -232,14 +232,14 @@ select_program() {
             if ! "$x_test_attempted" && ! "$x_test_completed"; then
                 add_result skipped
             fi
-            search_anyway=true ;;
+            search_anyway=true
+            ;;
         C|c)
             select_mp3_bitrate
             create_clip
             ;;
         T|t)
-            reset_score
-            ;;
+            reset_score ;;
         N|n)
             if ! "$x_test_attempted" && ! "$x_test_completed"; then
                 add_result skipped
@@ -798,6 +798,7 @@ show_results_and_cleanup() {
     async_cleanup &
 }
 
+# Allows terminal to return to the user while program cleans up
 async_cleanup() {
     for pid in "${create_clip_pids[@]}" "$vlc_pid"; do
         while kill -0 "$pid" 2>/dev/null; do
