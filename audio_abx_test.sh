@@ -214,12 +214,16 @@ select_program() {
             if [[ ! -f "$x_clip" ]]; then
                 x_clip=$(mktemp --suffix=.wav)
             fi
-            if (( x_clip_quality )); then
-                format=original
-                cp "$original_clip" "$x_clip"
-            else
-                format=lossy
-                cp "$lossy_clip" "$x_clip"
+            original_clip_modtime=$(stat -c "%Y" "$original_clip")
+            x_clip_modtime=$(stat -c "%Y" "$x_clip")
+            if [[ ! -s "$x_clip" ]] || (( original_clip_modtime > x_clip_modtime )); then
+                if (( x_clip_quality )); then
+                    format=original
+                    cp "$original_clip" "$x_clip"
+                else
+                    format=lossy
+                    cp "$lossy_clip" "$x_clip"
+                fi
             fi
             play_clip "$x_clip"
             x_test
