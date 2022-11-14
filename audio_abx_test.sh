@@ -68,20 +68,22 @@ main() {
     echo
 
     start_numbered_options_list "Source file quality selection"
-    numbered_options_list_option "Lossless only" "L"
-    numbered_options_list_option "Mixed lossy/lossless" "M"
+    numbered_options_list_option "All files" "A"
+    numbered_options_list_option "Lossless only" "S"
+    numbered_options_list_option "Lossy" "Y"
     while ! source_quality=$(user_selection "Selection: "); do
         warn "Invalid selection: '$source_quality'"
     done
     echo
 
-    lossless_regex='.*\.(flac|alac|wav|aiff)'
-    allmusic_regex='.*\.(flac|alac|wav|aiff|mp3|m4a|aac|ogg|opus|wma)'
-    if [[ "$source_quality" =~ ^[Ll]$ ]]; then
-        mapfile -t all_tracks < <(find "$music_dir" -type f -regextype egrep -iregex "$lossless_regex")
+    if [[ "$source_quality" =~ ^[Aa]$ ]]; then
+        audio_file_extension_regex='.*\.(flac|alac|wav|aiff|mp3|m4a|aac|ogg|opus|wma)'
+    elif [[ "$source_quality" =~ ^[Ss]$ ]]; then
+        audio_file_extension_regex='.*\.(flac|alac|wav|aiff)'
     else
-        mapfile -t all_tracks < <(find "$music_dir" -type f -regextype egrep -iregex "$allmusic_regex")
+        audio_file_extension_regex='.*\.(mp3|m4a|aac|ogg|opus|wma)'
     fi
+    mapfile -t all_tracks < <(find "$music_dir" -type f -regextype egrep -iregex "$audio_file_extension_regex")
 
     if (( ${#all_tracks[@]} == 0 )); then
         errr "No tracks were found in '$music_dir'"
