@@ -483,16 +483,27 @@ ellipsize() {
 
 # Wrapper around the async portion, allocates the temp filenames
 create_clip() {
-    # There should be only one encoding task running at a time
-    # the last one should've been killed but wait for it to be completely gone
-    wait "$create_clip_pid"
-    rm -f "$original_clip" "$lossy_clip" "$tmp_mp3"
+    cleanup_async &
 
     original_clip=$(mktemp --suffix=.wav)
     lossy_clip=$(mktemp --suffix=.wav)
     tmp_mp3=$(mktemp --suffix=.mp3)
     create_clip_async &
     create_clip_pid=$!
+}
+
+# Allows terminal to return to the user while program cleans up
+cleanup_async() {
+    if kill -0 "$create_clip_pid" 2>/dev/null; then
+        kill "$create_clip_pid" 2>/dev/null
+    fi
+    while kill -0 "$vlc_pid" 2>/dev/null; do
+        sleep 0.1
+    done
+    while kill -0 "$create_clip_pid" 2>/dev/null; do
+        sleep 0.1
+    done
+    rm -f "$original_clip" "$lossy_clip" "$tmp_mp3" "$tmp_output" "$x_clip"
 }
 
 # Create an original-quality clip and a lossy clip from a given track at the given timestamps
@@ -814,21 +825,7 @@ print_results() {
 # Trap function to run on exit, displaying the results and deleting all files used
 show_results_and_cleanup() {
     print_results
-    async_cleanup &
-}
-
-# Allows terminal to return to the user while program cleans up
-async_cleanup() {
-    if kill -0 "$create_clip_pid" 2>/dev/null; then
-        kill "$create_clip_pid" 2>/dev/null
-    fi
-    while kill -0 "$vlc_pid" 2>/dev/null; do
-        sleep 0.1
-    done
-    while kill -0 "$create_clip_pid" 2>/dev/null; do
-        sleep 0.1
-    done
-    rm -f "$original_clip" "$lossy_clip" "$tmp_mp3" "$tmp_output" "$x_clip"
+    cleanup_async &
 }
 
 main "$@"
