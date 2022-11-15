@@ -770,6 +770,7 @@ save_clip() {
     echo
 }
 
+# Print out details about the clip
 print_clip_info() {
     clear -x
     echo "Clip information"
