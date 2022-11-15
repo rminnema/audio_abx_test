@@ -90,17 +90,19 @@ main() {
     fi
 
     track_index=0
-    original_clips=()
-    lossy_clips=()
-    tmp_mp3s=()
+    original_clip=''
+    lossy_clip=''
+    tmp_mp3=''
+    vlc_pid=''
+    create_clip_pid=''
     max_idx=$(( ${#all_tracks[@]} - 1 ))
     mapfile -t random_order < <(shuf -i 0-"$max_idx" --random-source=/dev/urandom)
 
     declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
     search_anyway=false
     while true; do
-        if (( ${#create_clip_pids[@]} > 0 )); then
-            kill "${create_clip_pids[-1]}" 2>/dev/null
+        if kill -0 "$create_clip_pid" 2>/dev/null; then
+            kill "$create_clip_pid" 2>/dev/null
         fi
         if "$search_anyway" || [[ ! "$random" =~ ^[Yy]$ ]]; then
             read -rp "Track search string: " search_string
@@ -281,6 +283,7 @@ select_program() {
     esac
 }
 
+# Add track and X-test result information to the list of results
 add_result() {
     local track_info result numresults
     track_info=${track_details_map["$track"]}
@@ -363,6 +366,7 @@ select_mp3_bitrate() {
     last_bitrate=$bitrate
 }
 
+# Resets the user's score to zero and empties their results list
 reset_score() {
     if [[ "$last_bitrate" ]]; then
         print_results
@@ -374,6 +378,8 @@ reset_score() {
     results=()
 }
 
+# Prompt the user for a string and then search for tracks with titles matching the string
+# String may be any valid regex grep -E accepts except for line termination markers
 track_search() {
     if [[ ! -f "$tmp_output" ]]; then
         tmp_output=$(mktemp)
@@ -428,6 +434,7 @@ random_track() {
     fi
 }
 
+# Read track metadata such as duration, title, album, artist, bitrate, and encoding format
 generate_track_details() {
     if [[ "${ffprobe:?}" == *ffprobe.exe ]]; then
         local ffprobe_track; ffprobe_track=$(wslpath -w "$1")
@@ -464,6 +471,7 @@ generate_track_details() {
     format_map["$track"]=$track_format
 }
 
+# Truncates lengthy fields and adds ellipsis to indicate such
 ellipsize() {
     str=$*
     if (( ${#str} > max_field_length + 3 )); then
@@ -473,16 +481,18 @@ ellipsize() {
     fi
 }
 
+# Wrapper around the async portion, allocates the temp filenames
 create_clip() {
-    original_clips+=( "$(mktemp --suffix=.wav)" )
-    original_clip=${original_clips[-1]}
-    lossy_clips+=( "$(mktemp --suffix=.wav)" )
-    lossy_clip=${lossy_clips[-1]}
-    tmp_mp3s+=( "$(mktemp --suffix=.mp3)" )
-    tmp_mp3=${tmp_mp3s[-1]}
+    # There should be only one encoding task running at a time
+    # the last one should've been killed but wait for it to be completely gone
+    wait "$create_clip_pid"
+    rm -f "$original_clip" "$lossy_clip" "$tmp_mp3"
 
+    original_clip=$(mktemp --suffix=.wav)
+    lossy_clip=$(mktemp --suffix=.wav)
+    tmp_mp3=$(mktemp --suffix=.mp3)
     create_clip_async &
-    create_clip_pids+=( "$!" )
+    create_clip_pid=$!
 }
 
 # Create an original-quality clip and a lossy clip from a given track at the given timestamps
@@ -621,15 +631,19 @@ play_clip() {
         info "You must close the current instance of VLC to open another one."
         wait "$vlc_pid"
     fi
-    if kill -0 "${create_clip_pids[-1]}" 2>/dev/null; then
+    if kill -0 "$create_clip_pid" 2>/dev/null; then
         echo
         info "Please wait while the encoding job finishes."
-        wait "${create_clip_pids[-1]}"
+        wait "$create_clip_pid"
     fi
     "${vlc:?}" "$vlc_clip" &>/dev/null &
     vlc_pid=$!
 }
 
+# Randomly selects the quality for the clip and plays it for the user, then
+# asks the user to guess whether the clip is original quality or MP3 compressed
+# Allows user to return to menu to try A or B test again or re-clip the current
+# track, but the user will not be able to skip ahead to the next track
 x_test() {
     forfeit=false
     x_test_attempted=true
@@ -727,10 +741,10 @@ save_clip() {
     end_ts=$(seconds_to_timespec "$endsec" | tr -d ':')
     local save_file="$clips_dir/$save_file_basename -- $compression.$start_ts.$end_ts.$file_fmt"
 
-    if kill -0 "${create_clip_pids[-1]}" 2>/dev/null; then
+    if kill -0 "$create_clip_pid" 2>/dev/null; then
         echo
         info "Please wait while clip creation finishes."
-        wait "${create_clip_pids[-1]}"
+        wait "$create_clip_pid"
     fi
     echo
     if [[ "$save_choice_2" == 1 ]]; then
@@ -804,12 +818,16 @@ show_results_and_cleanup() {
 
 # Allows terminal to return to the user while program cleans up
 async_cleanup() {
-    for pid in "${create_clip_pids[@]}" "$vlc_pid"; do
-        while kill -0 "$pid" 2>/dev/null; do
-            sleep 0.1
-        done
+    if kill -0 "$create_clip_pid" 2>/dev/null; then
+        kill "$create_clip_pid" 2>/dev/null
+    fi
+    while kill -0 "$vlc_pid" 2>/dev/null; do
+        sleep 0.1
     done
-    rm -f "${original_clips[@]}" "${lossy_clips[@]}" "${tmp_mp3s[@]}" "$tmp_output" "$x_clip"
+    while kill -0 "$create_clip_pid" 2>/dev/null; do
+        sleep 0.1
+    done
+    rm -f "$original_clip" "$lossy_clip" "$tmp_mp3" "$tmp_output" "$x_clip"
 }
 
 main "$@"
