@@ -769,7 +769,7 @@ save_clip() {
     local artist=${artists_map["$track"]}
     local album=${albums_map["$track"]}
     local title=${titles_map["$track"]}
-    local save_file_basename && save_file_basename=$(sed 's/\//-/g' <<< "$artist -- $album -- $title")
+    local save_file_basename && save_file_basename=$(sed 's|/|-|g' <<< "$artist -- $album -- $title")
     local start_ts && start_ts=$(seconds_to_timespec "$startsec" | tr -d ':')
     local end_ts && end_ts=$(seconds_to_timespec "$endsec" | tr -d ':')
     local save_file="$clips_dir/$save_file_basename -- $compression.$start_ts.$end_ts.$file_fmt"
