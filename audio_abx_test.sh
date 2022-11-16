@@ -77,13 +77,15 @@ main() {
     echo
 
     if [[ "$source_quality" =~ ^[Aa]$ ]]; then
-        audio_file_extension_regex='.*\.(flac|alac|wav|aiff|mp3|m4a|aac|ogg|opus|wma)'
+        audio_file_extensions='flac|alac|wav|aiff|mp3|m4a|aac|ogg|opus|wma'
     elif [[ "$source_quality" =~ ^[Ss]$ ]]; then
-        audio_file_extension_regex='.*\.(flac|alac|wav|aiff)'
+        audio_file_extensions='flac|alac|wav|aiff'
+    elif [[ "$source_quality" =~ ^[Yy]$ ]]; then
+        audio_file_extensions='mp3|m4a|aac|ogg|opus|wma'
     else
-        audio_file_extension_regex='.*\.(mp3|m4a|aac|ogg|opus|wma)'
+        errr "Unexpected condition occurred: source_quality='$source_quality'"
     fi
-    mapfile -t all_tracks < <(find "$music_dir" -type f -regextype egrep -iregex "$audio_file_extension_regex")
+    mapfile -t all_tracks < <(find "$music_dir" -type f -regextype egrep -iregex ".*\.($audio_file_extensions)")
 
     if (( ${#all_tracks[@]} == 0 )); then
         errr "No tracks were found in '$music_dir'"
@@ -270,11 +272,13 @@ select_program() {
             echo
             if [[ "$timestamp_selection" =~ ^[Mm]$ ]]; then
                 user_timestamps
-            else
+            elif [[ "$timestamp_selection" =~ ^[Rr]$ ]]; then
                 if ! random_timestamps; then
                     warn "Something went wrong with random timestamps"
                     return 1
                 fi
+            else
+                errr "Unexpected condition occurred: timestamp_selection='$timestamp_selection'"
             fi
             create_clip
             ;;
@@ -368,9 +372,7 @@ select_mp3_bitrate() {
 
 # Resets the user's score to zero and empties their results list
 reset_score() {
-    if [[ "$last_bitrate" ]]; then
-        print_results
-    fi
+    print_results
     accuracy=0
     correct=0
     incorrect=0
@@ -673,6 +675,8 @@ x_test() {
         echo
         info "You forfeited. The file was ${format^^}"
         add_result forfeit
+    elif [[ ! "$retry_guess_forfeit" =~ ^[Gg]$ ]]; then
+        errr "Unexpected condition occurred: retry_guess_forfeit='$retry_guess_forfeit'"
     fi
     if ! "$forfeit"; then
         unset confirmation
@@ -694,8 +698,10 @@ x_test() {
         done
         if [[ "$guess" =~ ^[Oo]$ ]]; then
             guess_fmt=original
-        else
+        elif [[ "$guess" =~ ^[Ll]$ ]]; then
             guess_fmt=lossy
+        else
+            errr "Unexpected condition occurred: guess='$guess'"
         fi
         echo
         if [[ "$guess_fmt" == "$format" ]]; then
@@ -721,35 +727,41 @@ save_clip() {
     start_numbered_options_list "Select a quality level to save in."
     numbered_options_list_option "Save original quality" "O"
     numbered_options_list_option "Save lossy quality" "L"
+    numbered_options_list_option "Cancel and return to main menu" "C"
     while ! save_choice_1=$(user_selection "Selection: "); do
         warn "Invalid selection: '$save_choice_1'"
     done
     echo
+    if [[ "$save_choice_1" =~ ^[Oo]$ ]]; then
+        local compression=original
+        local clip_to_save="$original_clip"
+    elif [[ "$save_choice_1" =~ ^[Ll]$ ]]; then
+        local compression=lossy
+        local clip_to_save="$lossy_clip"
+    else
+        return 0
+    fi
     local save_choice_2
     start_numbered_options_list "Select a file format to save in."
     numbered_options_list_option "Save as WAV" "W"
     numbered_options_list_option "Save as FLAC" "F"
+    numbered_options_list_option "Cancel and return to main menu" "C"
     while ! save_choice_2=$(user_selection "Selection: "); do
         warn "Invalid selection: '$save_choice_2'"
     done
+    if [[ "$save_choice_2" =~ ^[Ww]$ ]]; then
+        local file_fmt=wav
+    elif [[ "$save_choice_2" =~ ^[Ff]$ ]]; then
+        local file_fmt=flac
+    else
+        return 0
+    fi
     local artist=${artists_map["$track"]}
     local album=${albums_map["$track"]}
     local title=${titles_map["$track"]}
     local save_file_basename && save_file_basename=$(sed 's/\//-/g' <<< "$artist -- $album -- $title")
-    if [[ "$save_choice_1" =~ ^[Oo]$ ]]; then
-        local compression=original
-        local clip_to_save="$original_clip"
-    else
-        local compression=lossy
-        local clip_to_save="$lossy_clip"
-    fi
-    if [[ "$save_choice_2" =~ ^[Ww]$ ]]; then
-        local file_fmt=wav
-    else
-        local file_fmt=flac
-    fi
-    start_ts=$(seconds_to_timespec "$startsec" | tr -d ':')
-    end_ts=$(seconds_to_timespec "$endsec" | tr -d ':')
+    local start_ts && start_ts=$(seconds_to_timespec "$startsec" | tr -d ':')
+    local end_ts && end_ts=$(seconds_to_timespec "$endsec" | tr -d ':')
     local save_file="$clips_dir/$save_file_basename -- $compression.$start_ts.$end_ts.$file_fmt"
 
     if kill -0 "$create_clip_pid" 2>/dev/null; then
@@ -758,7 +770,7 @@ save_clip() {
         wait "$create_clip_pid"
     fi
     echo
-    if [[ "$save_choice_2" == 1 ]]; then
+    if [[ "$save_choice_2" =~ ^[Ww]$ ]]; then
         if cp "$clip_to_save" "$save_file"; then
             echo "${compression^} clip saved to:"
             echo "$save_file"
