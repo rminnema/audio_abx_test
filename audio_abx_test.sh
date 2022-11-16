@@ -266,6 +266,7 @@ select_program() {
             start_numbered_options_list "Input timestamps manually or have them randomly generated?"
             numbered_options_list_option "Manual timestamps" "M"
             numbered_options_list_option "Random timestamps" "R"
+            numbered_options_list_option "Cancel and return to main menu" "C"
             while ! timestamp_selection=$(user_selection "Selection: "); do
                 warn "Invalid selection: '$timestamp_selection'"
             done
@@ -277,6 +278,8 @@ select_program() {
                     warn "Something went wrong with random timestamps"
                     return 1
                 fi
+            elif [[ "$timestamp_selection" =~ ^[Cc]$ ]]; then
+                return 0
             else
                 errr "Unexpected condition occurred: timestamp_selection='$timestamp_selection'"
             fi
