@@ -738,8 +738,10 @@ save_clip() {
     elif [[ "$save_choice_1" =~ ^[Ll]$ ]]; then
         local compression=lossy
         local clip_to_save="$lossy_clip"
-    else
+    elif [[ "$save_choice_1" =~ ^[Cc]$ ]]; then
         return 0
+    else
+        errr "Unexpected condition occurred: save_choice_1='$save_choice_1'"
     fi
     local save_choice_2
     start_numbered_options_list "Select a file format to save in."
@@ -753,8 +755,10 @@ save_clip() {
         local file_fmt=wav
     elif [[ "$save_choice_2" =~ ^[Ff]$ ]]; then
         local file_fmt=flac
-    else
+    elif [[ "$save_choice_2" =~ ^[Cc]$ ]]; then
         return 0
+    else
+        errr "Unexpected condition occurred: save_choice_2='$save_choice_2'"
     fi
     local artist=${artists_map["$track"]}
     local album=${albums_map["$track"]}
@@ -777,7 +781,7 @@ save_clip() {
         else
             warn "Could not save $save_file"
         fi
-    else
+    elif [[ "$save_choice_2" =~ ^[Ff]$ ]]; then
         if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
             touch "$save_file"
             save_file=$(wslpath -w "$save_file")
@@ -819,7 +823,7 @@ print_results() {
             } | column -ts '|'
         fi
         echo
-        echo "Bitrate: ${bitrate}bps"
+        echo "Bitrate: ${bitrate::-1} kbps"
         {
             echo "Number|Artist|Album|Track|Result|Guess"
             for result in "${results[@]}"; do
