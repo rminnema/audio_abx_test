@@ -267,6 +267,7 @@ select_program() {
             numbered_options_list_option "Manual timestamps" "M"
             numbered_options_list_option "Random timestamps" "R"
             numbered_options_list_option "Cancel and return to main menu" "C"
+            local timestamp_selection
             while ! timestamp_selection=$(user_selection "Selection: "); do
                 warn "Invalid selection: '$timestamp_selection'"
             done
@@ -292,23 +293,22 @@ select_program() {
 
 # Add track and X-test result information to the list of results
 add_result() {
-    local track_info result numresults
-    track_info=${track_details_map["$track"]}
-    numresults=$(( ${#results[@]} + 1 ))
+    local track_info=${track_details_map["$track"]}
+    local numresults=$(( ${#results[@]} + 1 ))
     if [[ "$1" == skipped ]]; then
         skipped=$(( skipped + 1 ))
-        result="$numresults|$track_info|Skipped|${YELLOW}Skipped${NOCOLOR}"
+        local result="$numresults|$track_info|${1^}|${YELLOW}${1^}${NOCOLOR}"
     elif [[ "$1" == quit ]]; then
-        result="$numresults|$track_info|Quit|${YELLOW}Quit${NOCOLOR}"
+        local result="$numresults|$track_info|${1^}|${YELLOW}${1^}${NOCOLOR}"
     elif [[ "$1" == forfeit ]]; then
         incorrect=$(( incorrect + 1 ))
-        result="$numresults|$track_info|Forfeit|${RED}Forfeit${NOCOLOR}"
+        local result="$numresults|$track_info|${1^}|${RED}${1^}${NOCOLOR}"
     elif [[ "$1" && "$2" && "$1" == "$2" ]]; then
         correct=$(( correct + 1 ))
-        result="$numresults|$track_info|${1^}|${GREEN}${2^}${NOCOLOR}"
+        local result="$numresults|$track_info|${1^}|${GREEN}${2^}${NOCOLOR}"
     elif [[ "$1" && "$2" && "$1" != "$2" ]]; then
         incorrect=$(( incorrect + 1 ))
-        result="$numresults|$track_info|${1^}|${RED}${2^}${NOCOLOR}"
+        local result="$numresults|$track_info|${1^}|${RED}${2^}${NOCOLOR}"
     else
         return 1
     fi
@@ -330,6 +330,7 @@ select_mp3_bitrate() {
         fi
     done
     numbered_options_list_option "Custom"
+    local bitrate_selection
     while ! bitrate_selection=$(user_selection "Selection: "); do
         warn "Invalid selection: '$bitrate_selection'"
     done
@@ -405,7 +406,7 @@ track_search() {
         for i in "${matched_track_indices[@]}"; do
             track=${all_tracks[$(( i - 1 ))]}
             generate_track_details "$track"
-            duration_str=$(seconds_to_timespec "${durations_map["$track"]}")
+            local duration_str && duration_str=$(seconds_to_timespec "${durations_map["$track"]}")
             track_info=${track_details_map["$track"]}
             tracks_list+=( "$track_info|$duration_str" )
         done
@@ -418,6 +419,7 @@ track_search() {
             numbered_options_list_option "Select a new track"
         } > "$tmp_output"
         column -ts '|' "$tmp_output"
+        local track_selection
         while ! track_selection=$(user_selection "Selection: "); do
             warn "Invalid selection: $track_selection"
         done
@@ -442,20 +444,19 @@ random_track() {
 # Read track metadata such as duration, title, album, artist, bitrate, and encoding format
 generate_track_details() {
     if [[ "${ffprobe:?}" == *ffprobe.exe ]]; then
-        local ffprobe_track; ffprobe_track=$(wslpath -w "$1")
+        local ffprobe_track && ffprobe_track=$(wslpath -w "$1")
     else
         local ffprobe_track=$1
     fi
 
     local fmt="default=noprint_wrappers=1:nokey=1"
-    local ffprobe_opts
-    ffprobe_opts=( -v fatal -select_streams a -show_entries "stream=duration" -of "$fmt" "$ffprobe_track" )
-    local track_duration; track_duration=$("${ffprobe:?}" "${ffprobe_opts[@]}" | sed 's/\r//g')
-    local track_duration_int; track_duration_int=$(grep -Eo "^[0-9]*" <<< "$track_duration")
+    local ffprobe_opts=( -v fatal -select_streams a -show_entries "stream=duration" -of "$fmt" "$ffprobe_track" )
+    local track_duration && track_duration=$("${ffprobe:?}" "${ffprobe_opts[@]}" | sed 's/\r//g')
+    local track_duration_int && track_duration_int=$(grep -Eo "^[0-9]*" <<< "$track_duration")
     durations_map["$track"]=$track_duration_int
 
     if [[ "${mediainfo:?}" == *mediainfo.exe ]]; then
-        local mediainfo_track; mediainfo_track=$(wslpath -w "$1")
+        local mediainfo_track && mediainfo_track=$(wslpath -w "$1")
     else
         local mediainfo_track=$1
     fi
@@ -478,7 +479,7 @@ generate_track_details() {
 
 # Truncates lengthy fields and adds ellipsis to indicate such
 ellipsize() {
-    str=$*
+    local str=$*
     if (( ${#str} > max_field_length + 3 )); then
         cut -c 1-"$max_field_length" <<< "$str" | sed -e 's/\s*$//' -e 's/$/.../'
     else
@@ -515,9 +516,9 @@ cleanup_async() {
 # Obfuscate both original quality and lossy clips as .wav so it cannot easily be determined which is the X file
 create_clip_async() {
     if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
-        local ffmpeg_track; ffmpeg_track=$(wslpath -w "$track")
-        local ffmpeg_original_clip; ffmpeg_original_clip=$(wslpath -w "$original_clip")
-        local ffmpeg_lossy_clip; ffmpeg_lossy_clip=$(wslpath -w "$lossy_clip")
+        local ffmpeg_track && ffmpeg_track=$(wslpath -w "$track")
+        local ffmpeg_original_clip && ffmpeg_original_clip=$(wslpath -w "$original_clip")
+        local ffmpeg_lossy_clip && ffmpeg_lossy_clip=$(wslpath -w "$lossy_clip")
     else
         local ffmpeg_track=$track
         local ffmpeg_original_clip=$original_clip
@@ -661,12 +662,13 @@ play_clip() {
 # Allows user to return to menu to try A or B test again or re-clip the current
 # track, but the user will not be able to skip ahead to the next track
 x_test() {
-    forfeit=false
+    local forfeit=false
     x_test_attempted=true
     start_numbered_options_list
     numbered_options_list_option "Guess" "G"
     numbered_options_list_option "Retry" "R"
     numbered_options_list_option "Forfeit" "F"
+    local retry_guess_forfeit
     while ! retry_guess_forfeit=$(user_selection "Selection: "); do
         warn "Invalid selection: '$retry_guess_forfeit'"
         echo
@@ -682,12 +684,12 @@ x_test() {
         errr "Unexpected condition occurred: retry_guess_forfeit='$retry_guess_forfeit'"
     fi
     if ! "$forfeit"; then
-        unset confirmation
         while [[ ! "$confirmation" =~ ^[Yy]$ ]]; do
             echo
             start_numbered_options_list "Which did you just hear?"
             numbered_options_list_option "Original quality" "O"
             numbered_options_list_option "Lossy compression" "L"
+            local guess
             while ! guess=$(user_selection "Selection: "); do
                 warn "Invalid selection: '$guess'"
             done
@@ -695,14 +697,15 @@ x_test() {
             start_numbered_options_list "Are you sure?"
             numbered_options_list_option "Yes" "Y"
             numbered_options_list_option "No" "N"
+            local confirmation
             while ! confirmation=$(user_selection "Selection: "); do
                 warn "Invalid selection: '$confirmation'"
             done
         done
         if [[ "$guess" =~ ^[Oo]$ ]]; then
-            guess_fmt=original
+            local guess_fmt=original
         elif [[ "$guess" =~ ^[Ll]$ ]]; then
-            guess_fmt=lossy
+            local guess_fmt=lossy
         else
             errr "Unexpected condition occurred: guess='$guess'"
         fi
@@ -726,11 +729,11 @@ x_test() {
 # Save either the lossy or original clip with a user-friendly name to the clips_dir
 # Optional lossless compression to FLAC
 save_clip() {
-    local save_choice_1
     start_numbered_options_list "Select a quality level to save in."
     numbered_options_list_option "Save original quality" "O"
     numbered_options_list_option "Save lossy quality" "L"
     numbered_options_list_option "Cancel and return to main menu" "C"
+    local save_choice_1
     while ! save_choice_1=$(user_selection "Selection: "); do
         warn "Invalid selection: '$save_choice_1'"
     done
@@ -746,11 +749,11 @@ save_clip() {
     else
         errr "Unexpected condition occurred: save_choice_1='$save_choice_1'"
     fi
-    local save_choice_2
     start_numbered_options_list "Select a file format to save in."
     numbered_options_list_option "Save as WAV" "W"
     numbered_options_list_option "Save as FLAC" "F"
     numbered_options_list_option "Cancel and return to main menu" "C"
+    local save_choice_2
     while ! save_choice_2=$(user_selection "Selection: "); do
         warn "Invalid selection: '$save_choice_2'"
     done
