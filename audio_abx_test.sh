@@ -77,15 +77,17 @@ main() {
     echo
 
     if [[ "$source_quality" =~ ^[Aa]$ ]]; then
-        audio_file_extensions='flac|alac|wav|aiff|mp3|m4a|aac|ogg|opus|wma'
+        audio_exts='flac|alac|wav|aiff|mp3|m4a|aac|ogg|opus|wma'
     elif [[ "$source_quality" =~ ^[Ss]$ ]]; then
-        audio_file_extensions='flac|alac|wav|aiff'
+        audio_exts='flac|alac|wav|aiff'
     elif [[ "$source_quality" =~ ^[Yy]$ ]]; then
-        audio_file_extensions='mp3|m4a|aac|ogg|opus|wma'
+        audio_exts='mp3|m4a|aac|ogg|opus|wma'
     else
         errr "Unexpected condition occurred: source_quality='$source_quality'"
     fi
-    mapfile -t all_tracks < <(find "$music_dir" -type f -regextype egrep -iregex ".*\.($audio_file_extensions)")
+    mapfile -t all_artists < <(find "$music_dir" -mindepth 1 -maxdepth 1 -type d -not -name "MusicBee" | sort)
+    mapfile -t all_albums < <(find "$music_dir" -mindepth 2 -maxdepth 2 -type d | sort)
+    mapfile -t all_tracks < <(find "$music_dir" -type f -regextype egrep -iregex ".*\.($audio_exts)")
 
     if (( ${#all_tracks[@]} == 0 )); then
         errr "No tracks were found in '$music_dir'"
@@ -101,26 +103,37 @@ main() {
     mapfile -t random_order < <(shuf -i 0-"$max_idx" --random-source=/dev/urandom)
 
     declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
-    search_anyway=false
     while true; do
         if kill -0 "$create_clip_pid" 2>/dev/null; then
             kill "$create_clip_pid" 2>/dev/null
         fi
-        if "$search_anyway" || [[ ! "$random" =~ ^[Yy]$ ]]; then
-            read -rp "Track search string: " search_string
-            if [[ -z "$search_string" ]]; then
+        if [[ ! "$random" =~ ^[Yy]$ ]]; then
+            while true; do
+                unset matched_artists matched_albums matched_tracks
+                artist_search; status=$?
+                case "$status" in
+                    1) continue ;;
+                    2) break ;;
+                esac
+                album_search; status=$?
+                case "$status" in
+                    1) continue ;;
+                    2) break ;;
+                esac
+                track_search; status=$?
+                case "$status" in
+                    1) continue ;;
+                esac
+                break
+            done
+            if [[ "$status" == 0 ]]; then
+                user_timestamps || errr "Something went wrong with user timestamps"
+            else
                 random_track
-            elif ! track_search; then
-                continue
+                random_timestamps || errr "Something went wrong with random timestamps"
             fi
-            search_anyway=false
         else
-            unset search_string
             random_track
-        fi
-        if [[ "$search_string" ]]; then
-            user_timestamps || errr "Something went wrong with user timestamps"
-        else
             random_timestamps || errr "Something went wrong with random timestamps"
         fi
 
@@ -190,7 +203,7 @@ select_program() {
     numbered_options_list_option "Re-clip track" "R"
     if ! "$x_test_attempted" || "$x_test_completed"; then
         numbered_options_list_option "Next track" "N"
-        if [[ "$random" =~ ^[Yy]$ ]]; then
+        if [[ ! "$random" =~ ^[Yy]$ ]]; then
             numbered_options_list_option "Search next track" "F"
         fi
     fi
@@ -242,7 +255,6 @@ select_program() {
             if ! "$x_test_attempted" && ! "$x_test_completed"; then
                 add_result skipped
             fi
-            search_anyway=true
             ;;
         C|c)
             select_mp3_bitrate
@@ -384,69 +396,166 @@ reset_score() {
     results=()
 }
 
-# Prompt the user for a string and then search for tracks with titles matching the string
-# String may be any valid regex grep -E accepts except for line termination markers
-track_search() {
-    if [[ ! -f "$tmp_output" ]]; then
-        tmp_output=$(mktemp)
-    fi
+# Takes as input a UTF8 array
+# Converts the array to ASCII and searches against the ASCII array with the search_string
+# Returns an array of indices fo
+utf8_array_search() {
+    IFS=$'\n'
+    iconv -f utf8 -t ascii//TRANSLIT <<< "$*" |
+        grep -Ein "${search_string:-.*}[^/]*$" |
+        awk -F ':' '{ print $1 }' |
+        sed 's/$/ - 1/' |
+        bc
+}
 
-    echo
-    mapfile -t matched_track_indices < <(IFS=$'\n'; iconv -f utf8 -t ascii//TRANSLIT <<< "${all_tracks[*]}" |
-            grep -Ein "[^/]*${search_string}[^/]*$" | awk -F ':' '{ print $1 }')
-    if (( ${#matched_track_indices[@]} == 0 )); then
-        info "No tracks matched"
-        return 1
-    elif (( ${#matched_track_indices[@]} > 20 )); then
-        info "Too many tracks matched"
-        return 1
-    else
-        info "Select the desired track below:"
-        tracks_list=()
-        for i in "${matched_track_indices[@]}"; do
-            track=${all_tracks[$(( i - 1 ))]}
-            generate_track_details "$track"
-            local duration_str && duration_str=$(seconds_to_timespec "${durations_map["$track"]}")
-            track_info=${track_details_map["$track"]}
-            tracks_list+=( "$track_info|$duration_str" )
-        done
-        start_numbered_options_list
-        {
-            echo "Artist|Album|Title|Duration"
-            for entry in "${tracks_list[@]}"; do
-                numbered_options_list_option "$entry"
-            done
-            numbered_options_list_option "Select a new track"
-        } > "$tmp_output"
-        column -ts '|' "$tmp_output"
-        local track_selection
-        while ! track_selection=$(user_selection "Selection: "); do
-            warn "Invalid selection: $track_selection"
-        done
-        if [[ "$track_selection" == "$count" ]]; then
-            return 1
-        fi
-        selected_track_index=$(( ${matched_track_indices[$(( track_selection - 1 ))]} - 1 ))
-        track=${all_tracks[$selected_track_index]}
+# Search for an artist with a given string
+artist_search() {
+    local -a matched_artist_indices
+    local search_string artist_name artist_selection
+
+    read -rp "Artist search string: " search_string
+
+    mapfile -t matched_artist_indices < <(utf8_array_search "${all_artists[@]}")
+
+    start_numbered_options_list
+    for index in "${matched_artist_indices[@]}"; do
+        artist=${all_artists[$index]}
+        artist_name=$(basename "$artist")
+        numbered_options_list_option "$artist_name"
+        matched_artists+=( "$artist" )
+    done
+    (( ${#matched_artists[@]} > 1 )) && numbered_options_list_option "Search albums of all above artists"
+    numbered_options_list_option "Random track"
+    numbered_options_list_option "Search artist again"
+
+    while ! artist_selection=$(user_selection "Select an artist to search their albums: "); do
+        warn "Invalid selection: $artist_selection"
+    done
+    echo >&2
+    if (( artist_selection == count )); then
+        return 1 # Select another track (continue the loop)
+    elif (( artist_selection == count - 1 )); then
+        return 2 # Random track (break the loop)
+    elif (( ${#matched_artists[@]} > 1 && artist_selection == count - 2 )); then
+        return 0
+    elif (( artist_selection <= count - 2 )); then
+        matched_artists=( "${matched_artists[$(( artist_selection - 1 ))]}" ) # Search albums of a single artist
     fi
 }
 
-# As track list is already randomly sorted, just iterate through it
+# Search for an album with a given string
+album_search() {
+    local -a albums matched_album_indices
+    local search_string artist_name album_name album_selection
+    start_numbered_options_list
+    while (( album_selection == count )); do
+        start_numbered_options_list
+        read -rp "Album search string: " search_string
+        if [[ "$artist" ]]; then
+            mapfile -t albums < <(find "${matched_artists[@]}" -mindepth 1 -maxdepth 1 -type d)
+        else
+            albums=( "${all_albums[@]}" )
+        fi
+
+        mapfile -t matched_album_indices < <(utf8_array_search "${albums[@]}")
+
+        unset matched_albums
+        for index in "${matched_album_indices[@]}"; do
+            album=${albums[$index]}
+            album_name=$(basename "$album")
+            artist_name=$(awk -F '/' '{ print $(NF-1) }' <<< "$album")
+            numbered_options_list_option "$artist_name - $album_name"
+            matched_albums+=( "$album" )
+        done
+        (( ${#matched_albums[@]} > 1 )) && numbered_options_list_option "Search tracks of above albums"
+        numbered_options_list_option "Random track"
+        numbered_options_list_option "Search album again"
+        numbered_options_list_option "Search artist again"
+
+        while ! album_selection=$(user_selection "Select an album: "); do
+            warn "Invalid selection: $album_selection"
+        done
+        echo >&2
+        if (( album_selection == count )); then
+            continue # Search album again
+        elif (( album_selection == count - 1 )); then
+            return 1 # Search artist again
+        elif (( album_selection == count - 2 )); then
+            return 2 # Random track
+        elif (( ${#matched_albums[@]} > 1 && album_selection == count - 3 )); then
+            return 0
+        elif (( album_selection <= count - 3 )); then
+            matched_albums=( "${matched_albums[$(( album_selection - 1 ))]}" ) # Search one album
+        fi
+    done
+}
+
+# Search for a track with a given string
+track_search() {
+    local -a tracks matched_tracks matched_track_indices
+    local search_string artist_name album_name track_name track_number track_selection
+    start_numbered_options_list
+    while (( track_selection == count )); do
+        start_numbered_options_list
+        read -rp "Track title search string: " search_string
+        if (( ${#matched_albums[@]} > 0 )); then
+            mapfile -t tracks < <(find "${matched_albums[@]}" -mindepth 1 -maxdepth 1 -type f -regextype egrep -iregex ".*\.($audio_exts)")
+        elif (( ${#matched_artists[@]} > 0 )); then
+            mapfile -t tracks < <(find "${matched_artists[@]}" -maxdepth 2 -mindepth 2 -type f -regextype egrep -iregex ".*\.($audio_exts)")
+        else
+            tracks=( "${all_tracks[@]}" )
+        fi
+
+        mapfile -t matched_track_indices < <(utf8_array_search "${tracks[@]}")
+
+        for index in "${matched_track_indices[@]}"; do
+            track=${tracks[$index]}
+            track_number=$(basename "$track" | grep -o "^[0-9]*")
+            track_name=$(basename "$track" | sed 's/^[0-9]* - //')
+            album_name=$(awk -F '/' '{ print $(NF-1) }' <<< "$track")
+            artist_name=$(awk -F '/' '{ print $(NF-2) }' <<< "$track")
+            numbered_options_list_option "$artist_name - $album_name - #$track_number - $track_name"
+            matched_tracks+=( "$track" )
+        done
+        numbered_options_list_option "Random track"
+        numbered_options_list_option "Search artist again"
+        numbered_options_list_option "Search track again"
+
+        while ! track_selection=$(user_selection "Select a track: "); do
+            warn "Invalid selection: $track_selection"
+        done
+        echo >&2
+        if (( track_selection == count - 1 )); then
+            return 1
+        elif (( track_selection == count - 2 )); then
+            return 2
+        else
+            track="${matched_tracks[$(( track_selection - 1 ))]}"
+            generate_track_details
+        fi
+    done
+}
+
+# Iterate through the pre-generated array of random indices
+# and use each random index to select a track
 random_track() {
     random_index=${random_order[$track_index]}
     track=${all_tracks[$random_index]}
-    generate_track_details "$track"
+    generate_track_details
     if (( ++track_index >= ${#all_tracks[@]} )); then
         track_index=0
     fi
 }
 
-# Read track metadata such as duration, title, album, artist, bitrate, and encoding format
+# Read and store track metadata such as duration, title, album, artist, bitrate, and encoding format
 generate_track_details() {
+    if [[ "${track_details_map["$track"]}" ]]; then
+        return 0
+    fi
     if [[ "${ffprobe:?}" == *ffprobe.exe ]]; then
-        local ffprobe_track && ffprobe_track=$(wslpath -w "$1")
+        local ffprobe_track && ffprobe_track=$(wslpath -w "$track")
     else
-        local ffprobe_track=$1
+        local ffprobe_track=$track
     fi
 
     local fmt="default=noprint_wrappers=1:nokey=1"
@@ -456,9 +565,9 @@ generate_track_details() {
     durations_map["$track"]=$track_duration_int
 
     if [[ "${mediainfo:?}" == *mediainfo.exe ]]; then
-        local mediainfo_track && mediainfo_track=$(wslpath -w "$1")
+        local mediainfo_track && mediainfo_track=$(wslpath -w "$track")
     else
-        local mediainfo_track=$1
+        local mediainfo_track=$track
     fi
     local mediainfo_output='General;%Artist%|%Album%|%Title%|%BitRate%|%Format%'
     local track_artist track_album track_title track_bitrate track_format
@@ -469,12 +578,12 @@ generate_track_details() {
     track_album_ellipsized=$(ellipsize "$track_album")
     track_title_ellipsized=$(ellipsize "$track_title")
 
-    track_details_map["$track"]="$track_artist_ellipsized|$track_album_ellipsized|$track_title_ellipsized"
     artists_map["$track"]=$track_artist
     albums_map["$track"]=$track_album
     titles_map["$track"]=$track_title
     bitrate_map["$track"]=$(( track_bitrate / 1024 ))
     format_map["$track"]=$track_format
+    track_details_map["$track"]="$track_artist_ellipsized|$track_album_ellipsized|$track_title_ellipsized"
 }
 
 # Truncates lengthy fields and adds ellipsis to indicate such
@@ -509,7 +618,7 @@ cleanup_async() {
     while kill -0 "$create_clip_pid" 2>/dev/null; do
         sleep 0.1
     done
-    rm -f "$original_clip" "$lossy_clip" "$tmp_mp3" "$tmp_output" "$x_clip"
+    rm -f "$original_clip" "$lossy_clip" "$tmp_mp3" "$x_clip"
 }
 
 # Create an original-quality clip and a lossy clip from a given track at the given timestamps
