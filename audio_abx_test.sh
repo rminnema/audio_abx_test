@@ -402,10 +402,12 @@ reset_score() {
 utf8_array_search() {
     IFS=$'\n'
     iconv -f utf8 -t ascii//TRANSLIT <<< "$*" |
-        grep -Ein "${search_string:-.*}[^/]*$" |
+        awk -F '/' '{ print $NF }' |
+        grep -Ein "${search_string:-.*}" |
         awk -F ':' '{ print $1 }' |
         sed 's/$/ - 1/' |
         bc
+    IFS=$' \t\n'
 }
 
 # Search for an artist with a given string
