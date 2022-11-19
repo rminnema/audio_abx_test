@@ -398,7 +398,7 @@ reset_score() {
 
 # Takes as input a UTF8 array
 # Converts the array to ASCII and searches against the ASCII array with the search_string
-# Returns an array of indices fo
+# Returns an array of matching indices to the original UTF8 array
 utf8_array_search() {
     IFS=$'\n'
     iconv -f utf8 -t ascii//TRANSLIT <<< "$*" |
