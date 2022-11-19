@@ -77,17 +77,17 @@ main() {
     echo
 
     if [[ "$source_quality" =~ ^[Aa]$ ]]; then
-        audio_exts='flac|alac|wav|aiff|mp3|m4a|aac|ogg|opus|wma'
+        audio_file_extensions='flac|alac|wav|aiff|mp3|m4a|aac|ogg|opus|wma'
     elif [[ "$source_quality" =~ ^[Ss]$ ]]; then
-        audio_exts='flac|alac|wav|aiff'
+        audio_file_extensions='flac|alac|wav|aiff'
     elif [[ "$source_quality" =~ ^[Yy]$ ]]; then
-        audio_exts='mp3|m4a|aac|ogg|opus|wma'
+        audio_file_extensions='mp3|m4a|aac|ogg|opus|wma'
     else
         errr "Unexpected condition occurred: source_quality='$source_quality'"
     fi
     mapfile -t all_artists < <(find "$music_dir" -mindepth 1 -maxdepth 1 -type d -not -name "MusicBee" | sort)
     mapfile -t all_albums < <(find "$music_dir" -mindepth 2 -maxdepth 2 -type d | sort)
-    mapfile -t all_tracks < <(find "$music_dir" -type f -regextype egrep -iregex ".*\.($audio_exts)")
+    mapfile -t all_tracks < <(find "$music_dir" -type f -regextype egrep -iregex ".*\.($audio_file_extensions)")
 
     if (( ${#all_tracks[@]} == 0 )); then
         errr "No tracks were found in '$music_dir'"
@@ -494,14 +494,15 @@ album_search() {
 track_search() {
     local -a tracks matched_tracks matched_track_indices
     local search_string artist_name album_name track_name track_number track_selection
+    local findopts=( -mindepth 1 -maxdepth 1 -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" )
     start_numbered_options_list
     while (( track_selection == count )); do
         start_numbered_options_list
         read -rp "Track title search string: " search_string
         if (( ${#matched_albums[@]} > 0 )); then
-            mapfile -t tracks < <(find "${matched_albums[@]}" -mindepth 1 -maxdepth 1 -type f -regextype egrep -iregex ".*\.($audio_exts)")
+            mapfile -t tracks < <(find "${matched_albums[@]}" "${findopts[@]}")
         elif (( ${#matched_artists[@]} > 0 )); then
-            mapfile -t tracks < <(find "${matched_artists[@]}" -maxdepth 2 -mindepth 2 -type f -regextype egrep -iregex ".*\.($audio_exts)")
+            mapfile -t tracks < <(find "${matched_artists[@]}" "${findopts[@]}")
         else
             tracks=( "${all_tracks[@]}" )
         fi
