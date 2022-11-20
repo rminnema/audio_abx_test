@@ -675,7 +675,7 @@ user_timestamps() {
             info "Selecting random timestamp for a 30 second clip"
             random_timestamps
             return 0
-        elif [[ "$starts" =~ ^[SsFf]$ ]]; then
+        elif [[ "$startts" =~ ^[SsFf]$ ]]; then
             startsec=0
         else
             startsec=$(parse_time_to_seconds "$startts") || unset startsec
@@ -727,11 +727,21 @@ parse_time_to_seconds() {
 
 # Ensure that timestamps are valid
 sanitize_timestamps() {
+    # Ensure the start is before the end
+    if (( $(bc <<< "$endsec < $startsec") )); then
+        local tmpvar=$startsec
+        startsec=$endsec
+        endsec=$tmpvar
+    fi
+    if (( $(bc <<< "$endsec == $startsec") )); then
+        endsec=$(bc <<< "$endsec + 1")
+    fi
+
     # Ensure no negative start or end times
     if (( $(bc <<< "$startsec < 0") )); then
         startsec=0
     fi
-    if (( $(bc <<< "$endsec <= 0") )); then
+    if (( $(bc <<< "$endsec < 1") )); then
         endsec=1
     fi
 
@@ -744,15 +754,6 @@ sanitize_timestamps() {
         endsec=$(( track_duration_int ))
     fi
 
-    # Ensure the start is before the end
-    if (( $(bc <<< "$endsec < $startsec") )); then
-        local tmpvar=$startsec
-        startsec=$endsec
-        endsec=$tmpvar
-    fi
-    if (( $(bc <<< "$endsec == $startsec") )); then
-        endsec=$(bc <<< "$endsec + 1")
-    fi
     clip_duration=$(bc <<< "$endsec - $startsec")
 }
 
