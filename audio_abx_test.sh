@@ -102,6 +102,7 @@ main() {
     max_idx=$(( ${#all_tracks[@]} - 1 ))
     mapfile -t random_order < <(shuf -i 0-"$max_idx" --random-source=/dev/urandom)
     next_track_is_random=false
+    tmp_output=$(mktemp)
 
     declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
     while true; do
@@ -433,8 +434,6 @@ artist_search() {
     fi
 
     start_numbered_options_list
-    trap 'rm -f "$tmp_output"' RETURN
-    local tmp_output=$(mktemp)
     echo "|Artist" > "$tmp_output"
     for index in "${matched_artist_indices[@]}"; do
         artist=${all_artists[$index]}
@@ -477,8 +476,6 @@ album_search() {
     mapfile -t matched_album_indices < <(utf8_array_search "${albums[@]}")
 
     unset matched_albums
-    trap 'rm -f "$tmp_output"' RETURN
-    local tmp_output=$(mktemp)
     echo "|Artist|Album" > "$tmp_output"
     for index in "${matched_album_indices[@]}"; do
         album=${albums[$index]}
@@ -525,8 +522,6 @@ track_search() {
 
     mapfile -t matched_track_indices < <(utf8_array_search "${tracks[@]}")
 
-    trap 'rm -f "$tmp_output"' RETURN
-    tmp_output=$(mktemp)
     echo "|Artist|Album|Track # and title" > "$tmp_output"
     for index in "${matched_track_indices[@]}"; do
         track=${tracks[$index]}
@@ -644,7 +639,7 @@ cleanup_async() {
     while kill -0 "$create_clip_pid" 2>/dev/null; do
         sleep 0.1
     done
-    rm -f "$original_clip" "$lossy_clip" "$tmp_mp3" "$x_clip"
+    rm -f "$original_clip" "$lossy_clip" "$tmp_mp3" "$x_clip" "$tmp_output"
 }
 
 # Create an original-quality clip and a lossy clip from a given track at the given timestamps
