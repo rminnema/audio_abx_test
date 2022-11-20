@@ -14,6 +14,7 @@ info() { printf "%sInfo:%s %s\n\n" "$BLUE" "$NOCOLOR" "$*" >&2; }
 # Main program logic
 main() {
     term_width=$(tput cols)
+    term_lines=$(tput lines)
     max_field_length=$(( (term_width - 32)/3 ))
     config_file="$HOME/audio_abx_test.cfg"
     while (( $# > 0 )); do
@@ -62,18 +63,14 @@ main() {
     start_numbered_options_list "Fully random song and timestamp selection"
     numbered_options_list_option "Yes" "Y"
     numbered_options_list_option "No" "N"
-    while ! fully_random=$(user_selection "Selection: "); do
-        warn "Invalid selection: '$fully_random'"
-    done
+    fully_random=$(user_selection "Selection: ")
     echo
 
     start_numbered_options_list "Source file quality selection"
     numbered_options_list_option "All files" "A"
     numbered_options_list_option "Lossless only" "S"
     numbered_options_list_option "Lossy" "Y"
-    while ! source_quality=$(user_selection "Selection: "); do
-        warn "Invalid selection: '$source_quality'"
-    done
+    source_quality=$(user_selection "Selection: ")
     echo
 
     if [[ "$source_quality" =~ ^[Aa]$ ]]; then
@@ -136,9 +133,10 @@ main() {
 
 # Reset parameters for numbered options list
 start_numbered_options_list() {
-    echo "$*"
+    header="$*"
     count=0
     char_options=()
+    option_strings=()
 }
 
 # Print and store an incrementing list of options for user selection
@@ -146,33 +144,94 @@ numbered_options_list_option() {
     local option=$1
     local char=${2^^}
 
-    if [[ "$char" && ! "$char" =~ ^[A-Z]$ ]]; then
-        errr "You may only provide single chars to the numbered_options_list_option function second parameter"
+    if [[ "$char" && ! "$char" =~ ^[A-Z]$ ]] || [[ "$char" =~ [EQVW] ]]; then
+        errr "You may only provide single chars excluding E,Q,V, and W to the numbered_options_list_option function second parameter"
     fi
 
     if [[ "$char" ]]; then
-        printf "%s/%s) %s\n" "$(( ++count ))" "$char" "$option"
         char_options[$count]=$char
+        count=$(( count + 1 ))
+        option_strings+=( "$(printf "%s/%s) %s\n" "$count" "$char" "$option")" )
     else
-        printf "%s) %s\n" "$(( ++count ))" "$option"
+        count=$(( count + 1 ))
+        option_strings+=( "$(printf "%s) %s\n" "$count" "$option")" )
     fi
 }
 
-# Prompts the user for input and validates against provided options
+# Prints the numbered options then prompts the user for input and validates against provided options
 user_selection() {
-    local selection
-    read -rp "$1" selection
-    for option in $(seq "$count") "${char_options[@]}" "${char_options[@],,}"; do
-        if [[ "$selection" == "$option" ]]; then
-            if [[ "$selection" =~ ^[1-9][0-9]*$ ]] && (( selection <= count && ${#char_options[@]} > 0 )); then
-                selection=${char_options[$selection]:-$selection}
+    local start=1
+    local reserved=7
+    local end=$(awk -v start="$start" -v lines="$term_lines" -v options=${#option_strings[@]} -v rsv="$reserved" \
+              'BEGIN { options < start + lines - rsv ? end = options : end = start + lines - rsv; print end }')
+    local starts=()
+    local ends=()
+    if [[ "$1" == --noclear ]]; then
+        local clearscreen=false
+        shift
+    else
+        local clearscreen=true
+    fi
+    while true; do
+        echo >&2
+        "$clearscreen" && clear -x >&2
+
+        [[ "$header" ]] && echo "$header" >&2
+        for i in $(seq "$start" "$end"); do
+            echo "${option_strings[$(( i - 1 ))]}" >&2
+        done
+        local meta_options=0
+        if (( start > 1 )); then
+            echo "$(( end + ++meta_options ))/Q) First page" >&2
+            echo "$(( end + ++meta_options ))/V) Previous page" >&2
+        fi
+        if (( end < ${#option_strings[@]} )); then
+            echo "$(( end + ++meta_options ))/W) Last page" >&2
+            echo "$(( end + ++meta_options ))/E) Next page" >&2
+        fi
+
+        local selection
+        read -rp "$1" selection
+        if [[ -z "$selection" ]]; then
+            continue
+        fi
+        for option_number in $(seq "$start" "$end"); do
+            if [[ "$selection" == "$option_number" ]]; then
+                if [[ "${char_options[$(( option_number - 1 ))]}" ]]; then
+                    echo "${char_options[$(( option_number - 1 ))]}"
+                else
+                    echo "$selection"
+                fi
+                return 0
+            elif [[ "${selection^^}" == "${char_options[$(( option_number - 1 ))]}" ]]; then
+                echo "${selection^^}"
+                return 0
             fi
-            echo "$selection"
-            return 0
+        done
+        if [[ "$start" -gt 1 && "$selection" =~ ^[Vv]$ ]] || (( start > 1 && selection == end + 1 )); then
+            start=${starts[-1]}
+            end=${ends[-1]}
+            unset starts[-1] ends[-1]
+        elif [[ "$start" -gt 1 && "$selection" =~ ^[Qq]$ ]] || (( start > 1 && selection == end + 2 )); then
+            start=1
+            end=${ends[0]}
+            unset starts ends
+        elif [[ "$end" -lt "${#option_strings[@]}" && "$selection" =~ ^[Ee]$ ]] || (( end < ${#option_strings[@]} && selection == end + meta_options - 1 )); then
+            starts+=( "$start" )
+            ends+=( "$end" )
+            start=$(( end + 1 ))
+            end=$(awk -v start="$start" -v lines="$term_lines" -v options=${#option_strings[@]} -v rsv="$reserved" \
+                'BEGIN { options < start + lines - rsv ? end = options : end = start + lines - rsv; print end }')
+        elif [[ "$end" -lt "${#option_strings[@]}" && "$selection" =~ ^[Ww]$ ]] || (( end < ${#option_strings[@]} && selection == end + meta_options )); then
+            while (( end < ${#option_strings[@]} )); do
+                starts+=( "$start" )
+                ends+=( "$end" )
+                start=$(( end + 1 ))
+                end=$(awk -v start="$start" -v lines="$term_lines" -v options=${#option_strings[@]} -v rsv="$reserved" \
+                    'BEGIN { options < start + lines - rsv ? end = options : end = start + lines - rsv; print end }')
+            done
         fi
     done
-    echo "$selection"
-    return 1
 }
 
 # Provide the user with main options and take actions accordingly
@@ -200,11 +259,9 @@ select_program() {
     if [[ -d "$clips_dir" ]]; then
         numbered_options_list_option "Save clip" "S"
     fi
-    numbered_options_list_option "Quit" "Q"
+    numbered_options_list_option "Quit" "U"
 
-    while ! program_selection=$(user_selection "Selection: "); do
-        return 1
-    done
+    program_selection=$(user_selection --noclear "Selection: ")
     echo
     case "$program_selection" in
         A|a)
@@ -251,7 +308,7 @@ select_program() {
             fi
             next_track_is_random=false
             ;;
-        Q|q)
+        U|u)
             if ! "$x_test_completed"; then
                 add_result quit
             fi
@@ -264,9 +321,7 @@ select_program() {
             numbered_options_list_option "Random timestamps" "R"
             numbered_options_list_option "Cancel and return to main menu" "C"
             local timestamp_selection
-            while ! timestamp_selection=$(user_selection "Selection: "); do
-                warn "Invalid selection: '$timestamp_selection'"
-            done
+            timestamp_selection=$(user_selection "Selection: ")
             echo
             if [[ "$timestamp_selection" =~ ^[Mm]$ ]]; then
                 user_timestamps
@@ -327,9 +382,7 @@ select_mp3_bitrate() {
     done
     numbered_options_list_option "Custom" "C"
     local bitrate_selection
-    while ! bitrate_selection=$(user_selection "Selection: "); do
-        warn "Invalid selection: '$bitrate_selection'"
-    done
+    bitrate_selection=$(user_selection "Selection: ")
     echo
     case "$bitrate_selection" in
         1)
@@ -396,7 +449,7 @@ search_next_track() {
             track)  unset matched_tracks
                     track_search
                     ;;
-            selected)  
+            selected)
                     break ;;
         esac
     done
@@ -434,21 +487,17 @@ artist_search() {
     fi
 
     start_numbered_options_list
-    echo "|Artist" > "$tmp_output"
     for index in "${matched_artist_indices[@]}"; do
         artist=${all_artists[$index]}
         local artist_name=$(basename "$artist")
-        numbered_options_list_option "|$artist_name"
+        numbered_options_list_option "$artist_name"
         matched_artists+=( "$artist" )
-    done >> "$tmp_output"
-    column -ts '|' "$tmp_output"
+    done
     (( ${#matched_artists[@]} > 1 )) && numbered_options_list_option "Search albums of all above artists" "A"
     numbered_options_list_option "Retry search artist again" "R"
 
     local artist_selection
-    while ! artist_selection=$(user_selection "Select an artist to search their albums: "); do
-        warn "Invalid selection: $artist_selection"
-    done
+    artist_selection=$(user_selection "Select an artist to search their albums: ")
     if (( artist_selection == count )) || [[ "$artist_selection" =~ ^[Rr]$ ]]; then
         action=artist
     elif (( ${#matched_artists[@]} > 1 && artist_selection == count - 1 )) || [[ "$artist_selection" =~ ^[Aa]$ ]]; then
@@ -476,23 +525,19 @@ album_search() {
     mapfile -t matched_album_indices < <(utf8_array_search "${albums[@]}")
 
     unset matched_albums
-    echo "|Artist|Album" > "$tmp_output"
     for index in "${matched_album_indices[@]}"; do
         album=${albums[$index]}
         local album_name=$(basename "$album")
         local artist_name=$(awk -F '/' '{ print $(NF-1) }' <<< "$album")
-        numbered_options_list_option "|$artist_name|$album_name"
+        numbered_options_list_option "$artist_name - $album_name"
         matched_albums+=( "$album" )
-    done >> "$tmp_output"
-    column -ts '|' "$tmp_output"
+    done
     (( ${#matched_albums[@]} > 1 )) && numbered_options_list_option "Search tracks of above albums" "A"
     numbered_options_list_option "Search album again" "L"
     numbered_options_list_option "Search artist again" "R"
 
     local album_selection
-    while ! album_selection=$(user_selection "Select an album: "); do
-        warn "Invalid selection: $album_selection"
-    done
+    album_selection=$(user_selection "Select an album: ")
     if (( album_selection == count )) || [[ "$album_selection" =~ ^[Rr]$ ]]; then
         action=artist
     elif (( album_selection == count - 1 )) || [[ "$album_selection" =~ ^[Ll]$ ]]; then
@@ -522,27 +567,23 @@ track_search() {
 
     mapfile -t matched_track_indices < <(utf8_array_search "${tracks[@]}")
 
-    echo "|Artist|Album|Track # and title" > "$tmp_output"
     for index in "${matched_track_indices[@]}"; do
         track=${tracks[$index]}
         track_number=$(basename "$track" | grep -o "^[0-9]*")
         track_name=$(basename "$track" | sed 's/^[0-9]* - //')
         album_name=$(awk -F '/' '{ print $(NF-1) }' <<< "$track")
         artist_name=$(awk -F '/' '{ print $(NF-2) }' <<< "$track")
-        local list_option="|$(ellipsize "$artist_name")"
-        list_option+="|$(ellipsize "$album_name")"
-        list_option+="|$(ellipsize "#$track_number - $track_name")"
+        local list_option="$(ellipsize "$artist_name") - "
+        list_option+="$(ellipsize "$album_name") - "
+        list_option+="$(ellipsize "#$track_number - $track_name")"
         numbered_options_list_option "$list_option"
         matched_tracks+=( "$track" )
-    done >> "$tmp_output"
-    column -ts '|' "$tmp_output"
+    done
     numbered_options_list_option "Search track again" "T"
     numbered_options_list_option "Search album again" "L"
     numbered_options_list_option "Search artist again" "R"
 
-    while ! track_selection=$(user_selection "Select a track: "); do
-        warn "Invalid selection: $track_selection"
-    done
+    track_selection=$(user_selection "Select a track: ")
     if (( track_selection == count )) || [[ "$track_selection" =~ ^[Rr]$ ]]; then
         action=artist
     elif (( track_selection == count - 1 )) || [[ "$track_selection" =~ ^[Ll]$ ]]; then
@@ -807,10 +848,7 @@ x_test() {
     numbered_options_list_option "Retry" "R"
     numbered_options_list_option "Forfeit" "F"
     local retry_guess_forfeit
-    while ! retry_guess_forfeit=$(user_selection "Selection: "); do
-        warn "Invalid selection: '$retry_guess_forfeit'"
-        echo
-    done
+    retry_guess_forfeit=$(user_selection "Selection: ")
     if [[ "$retry_guess_forfeit" =~ ^[Rr]$ ]]; then
         return 0
     elif [[ "$retry_guess_forfeit" =~ ^[Ff]$ ]]; then
@@ -828,17 +866,13 @@ x_test() {
             numbered_options_list_option "Original quality" "O"
             numbered_options_list_option "Lossy compression" "L"
             local guess
-            while ! guess=$(user_selection "Selection: "); do
-                warn "Invalid selection: '$guess'"
-            done
+            guess=$(user_selection "Selection: ")
             echo
             start_numbered_options_list "Are you sure?"
             numbered_options_list_option "Yes" "Y"
             numbered_options_list_option "No" "N"
             local confirmation
-            while ! confirmation=$(user_selection "Selection: "); do
-                warn "Invalid selection: '$confirmation'"
-            done
+            confirmation=$(user_selection "Selection: ")
         done
         if [[ "$guess" =~ ^[Oo]$ ]]; then
             local guess_fmt=original
@@ -872,9 +906,7 @@ save_clip() {
     numbered_options_list_option "Save lossy quality" "L"
     numbered_options_list_option "Cancel and return to main menu" "C"
     local save_choice_1
-    while ! save_choice_1=$(user_selection "Selection: "); do
-        warn "Invalid selection: '$save_choice_1'"
-    done
+    save_choice_1=$(user_selection "Selection: ")
     echo
     if [[ "$save_choice_1" =~ ^[Oo]$ ]]; then
         local compression=original
@@ -892,9 +924,7 @@ save_clip() {
     numbered_options_list_option "Save as FLAC" "F"
     numbered_options_list_option "Cancel and return to main menu" "C"
     local save_choice_2
-    while ! save_choice_2=$(user_selection "Selection: "); do
-        warn "Invalid selection: '$save_choice_2'"
-    done
+    save_choice_2=$(user_selection "Selection: ")
     if [[ "$save_choice_2" =~ ^[Ww]$ ]]; then
         local file_fmt=wav
     elif [[ "$save_choice_2" =~ ^[Ff]$ ]]; then
