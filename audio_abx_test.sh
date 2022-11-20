@@ -108,33 +108,21 @@ main() {
             kill "$create_clip_pid" 2>/dev/null
         fi
         if [[ ! "$random" =~ ^[Yy]$ ]]; then
-            while true; do
-                unset matched_artists matched_albums matched_tracks
-                artist_search; status=$?
-                case "$status" in
-                    1) continue ;;
-                    2) break ;;
-                esac
-                album_search; status=$?
-                case "$status" in
-                    1) continue ;;
-                    2) break ;;
-                esac
-                track_search; status=$?
-                case "$status" in
-                    1) continue ;;
-                esac
-                break
+            start_numbered_options_list
+            numbered_options_list_option "Search next track" "S"
+            numbered_options_list_option "Random track" "R"
+            numbered_options_list_option "Quit" "Q"
+            while ! selection_method=$(user_selection "Select a method for choosing the next track: "); do
+                warn "Invalid selection: $selection_method"
             done
-            if [[ "$status" == 0 ]]; then
-                user_timestamps || errr "Something went wrong with user timestamps"
-            else
-                random_track
-                random_timestamps || errr "Something went wrong with random timestamps"
-            fi
+
+            case "$selection_method" in
+                S|s)    search_next_track ;;
+                R|r)    random_next_track ;;
+                Q|q)    exit 0 ;;
+            esac
         else
-            random_track
-            random_timestamps || errr "Something went wrong with random timestamps"
+            random_next_track
         fi
 
         create_clip
@@ -203,9 +191,6 @@ select_program() {
     numbered_options_list_option "Re-clip track" "R"
     if ! "$x_test_attempted" || "$x_test_completed"; then
         numbered_options_list_option "Next track" "N"
-        if [[ ! "$random" =~ ^[Yy]$ ]]; then
-            numbered_options_list_option "Search next track" "F"
-        fi
     fi
     numbered_options_list_option "Change bitrate" "C"
     if (( ${#results[@]} > 0 )); then
@@ -251,11 +236,6 @@ select_program() {
             save_clip ;;
         P|p)
             print_results ;;
-        F|f)
-            if ! "$x_test_attempted" && ! "$x_test_completed"; then
-                add_result skipped
-            fi
-            ;;
         C|c)
             select_mp3_bitrate
             create_clip
@@ -396,6 +376,20 @@ reset_score() {
     results=()
 }
 
+search_next_track() {
+    while true; do
+        unset matched_artists matched_albums matched_tracks
+        artist_search || continue
+        album_search || continue
+        track_search || continue
+        break
+    done
+    generate_track_details
+    until user_timestamps; do
+        warn "Something went wrong when trying to set user timestamps"
+    done
+}
+
 # Takes as input a UTF8 array
 # Converts the array to ASCII and searches against the ASCII array with the search_string
 # Returns an array of matching indices to the original UTF8 array
@@ -419,28 +413,33 @@ artist_search() {
 
     mapfile -t matched_artist_indices < <(utf8_array_search "${all_artists[@]}")
 
+    if (( ${#matched_artist_indices[@]} == 0 )); then
+        warn "No artists matched the search string '$search_string'"
+        return 1
+    fi
+
     start_numbered_options_list
+    trap 'rm -f "$tmp_output"' RETURN
+    tmp_output=$(mktemp)
+    echo "|Artist" > "$tmp_output"
     for index in "${matched_artist_indices[@]}"; do
         artist=${all_artists[$index]}
         artist_name=$(basename "$artist")
-        numbered_options_list_option "$artist_name"
+        numbered_options_list_option "|$artist_name"
         matched_artists+=( "$artist" )
-    done
+    done >> "$tmp_output"
+    column -ts '|' "$tmp_output"
     (( ${#matched_artists[@]} > 1 )) && numbered_options_list_option "Search albums of all above artists"
-    numbered_options_list_option "Random track"
     numbered_options_list_option "Search artist again"
 
     while ! artist_selection=$(user_selection "Select an artist to search their albums: "); do
         warn "Invalid selection: $artist_selection"
     done
-    echo >&2
     if (( artist_selection == count )); then
         return 1 # Select another track (continue the loop)
-    elif (( artist_selection == count - 1 )); then
-        return 2 # Random track (break the loop)
-    elif (( ${#matched_artists[@]} > 1 && artist_selection == count - 2 )); then
+    elif (( ${#matched_artists[@]} > 1 && artist_selection == count - 1 )); then
         return 0
-    elif (( artist_selection <= count - 2 )); then
+    elif (( artist_selection <= count - 1 )); then
         matched_artists=( "${matched_artists[$(( artist_selection - 1 ))]}" ) # Search albums of a single artist
     fi
 }
@@ -462,31 +461,31 @@ album_search() {
         mapfile -t matched_album_indices < <(utf8_array_search "${albums[@]}")
 
         unset matched_albums
+        trap 'rm -f "$tmp_output"' RETURN
+        tmp_output=$(mktemp)
+        echo "|Artist|Album" > "$tmp_output"
         for index in "${matched_album_indices[@]}"; do
             album=${albums[$index]}
             album_name=$(basename "$album")
             artist_name=$(awk -F '/' '{ print $(NF-1) }' <<< "$album")
-            numbered_options_list_option "$artist_name - $album_name"
+            numbered_options_list_option "|$artist_name|$album_name"
             matched_albums+=( "$album" )
-        done
+        done >> "$tmp_output"
+        column -ts '|' "$tmp_output"
         (( ${#matched_albums[@]} > 1 )) && numbered_options_list_option "Search tracks of above albums"
-        numbered_options_list_option "Random track"
         numbered_options_list_option "Search album again"
         numbered_options_list_option "Search artist again"
 
         while ! album_selection=$(user_selection "Select an album: "); do
             warn "Invalid selection: $album_selection"
         done
-        echo >&2
         if (( album_selection == count )); then
             continue # Search album again
         elif (( album_selection == count - 1 )); then
             return 1 # Search artist again
-        elif (( album_selection == count - 2 )); then
-            return 2 # Random track
-        elif (( ${#matched_albums[@]} > 1 && album_selection == count - 3 )); then
+        elif (( ${#matched_albums[@]} > 1 && album_selection == count - 2 )); then
             return 0
-        elif (( album_selection <= count - 3 )); then
+        elif (( album_selection <= count - 2 )); then
             matched_albums=( "${matched_albums[$(( album_selection - 1 ))]}" ) # Search one album
         fi
     done
@@ -511,28 +510,31 @@ track_search() {
 
         mapfile -t matched_track_indices < <(utf8_array_search "${tracks[@]}")
 
+        trap 'rm -f "$tmp_output"' RETURN
+        tmp_output=$(mktemp)
+        echo "|Artist|Album|Track # and title" > "$tmp_output"
         for index in "${matched_track_indices[@]}"; do
             track=${tracks[$index]}
             track_number=$(basename "$track" | grep -o "^[0-9]*")
             track_name=$(basename "$track" | sed 's/^[0-9]* - //')
             album_name=$(awk -F '/' '{ print $(NF-1) }' <<< "$track")
             artist_name=$(awk -F '/' '{ print $(NF-2) }' <<< "$track")
-            numbered_options_list_option "$artist_name - $album_name - #$track_number - $track_name"
+            local list_option="|$(ellipsize "$artist_name")"
+            list_option+="|$(ellipsize "$album_name")"
+            list_option+="|$(ellipsize "#$track_number - $track_name")"
+            numbered_options_list_option "$list_option"
             matched_tracks+=( "$track" )
-        done
-        numbered_options_list_option "Random track"
+        done >> "$tmp_output"
+        column -ts '|' "$tmp_output"
         numbered_options_list_option "Search artist again"
         numbered_options_list_option "Search track again"
 
         while ! track_selection=$(user_selection "Select a track: "); do
             warn "Invalid selection: $track_selection"
         done
-        echo >&2
         if (( track_selection == count - 1 )); then
             return 1
-        elif (( track_selection == count - 2 )); then
-            return 2
-        else
+        elif (( track_selection < count )); then
             track="${matched_tracks[$(( track_selection - 1 ))]}"
             generate_track_details
         fi
@@ -541,13 +543,14 @@ track_search() {
 
 # Iterate through the pre-generated array of random indices
 # and use each random index to select a track
-random_track() {
+random_next_track() {
     random_index=${random_order[$track_index]}
     track=${all_tracks[$random_index]}
     generate_track_details
     if (( ++track_index >= ${#all_tracks[@]} )); then
         track_index=0
     fi
+    random_timestamps
 }
 
 # Read and store track metadata such as duration, title, album, artist, bitrate, and encoding format
