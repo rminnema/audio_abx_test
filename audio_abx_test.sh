@@ -675,15 +675,22 @@ user_timestamps() {
             info "Selecting random timestamp for a 30 second clip"
             random_timestamps
             return 0
+        elif [[ "$starts" =~ ^[SsFf]$ ]]; then
+            startsec=0
         else
             startsec=$(parse_time_to_seconds "$startts") || unset startsec
         fi
     done
 
-    while [[ -z "$endsec" ]]; do
+    if [[ "$startts" =~ ^[Ff]$ ]]; then
+        endsec=${durations_map["$track"]}
+    fi
+    until [[ "$endsec" ]]; do
         read -rp "End timestamp: " endts
         if [[ -z "$endts" ]]; then
             endsec=$(( startsec + 30 ))
+        elif [[ "$endts" =~ ^[Ee]$ ]]; then
+            endsec=${durations_map["$track"]}
         else
             endsec=$(parse_time_to_seconds "$endts") || unset endsec
         fi
