@@ -112,8 +112,6 @@ main() {
             search_next_track
         fi
 
-        create_clip
-
         x_clip_quality=$(( RANDOM%2 ))
         x_test_attempted=false
         x_test_completed=false
@@ -162,9 +160,8 @@ user_selection() {
     local starts=()
     local ends=()
     local invalid_selection=false
-    if [[ "$1" == --printinfo ]]; then
+    if [[ "${FUNCNAME[1]}" == select_program ]]; then
         local printinfo=true
-        shift
     else
         local printinfo=false
     fi
@@ -188,14 +185,18 @@ user_selection() {
         for i in $(seq "$start" "$end"); do
             echo "${option_strings[$(( i - 1 ))]}" >&2
         done
-        local meta_options=0
+        local meta_options=()
         if (( start > 1 )); then
-            echo "$(( end + ++meta_options ))/Q) First page" >&2
-            echo "$(( end + ++meta_options ))/V) Previous page" >&2
+            meta_options[$(( end + ${#meta_options[@]} + 1 ))]=Q
+            echo "$(( end + ${#meta_options[@]} ))/Q) First page" >&2
+            meta_options[$(( end + ${#meta_options[@]} + 1 ))]=V
+            echo "$(( end + ${#meta_options[@]} ))/V) Previous page" >&2
         fi
         if (( end < ${#option_strings[@]} )); then
-            echo "$(( end + ++meta_options ))/W) Last page" >&2
-            echo "$(( end + ++meta_options ))/E) Next page" >&2
+            meta_options[$(( end + ${#meta_options[@]} + 1 ))]=W
+            echo "$(( end + ${#meta_options[@]} ))/W) Last page" >&2
+            meta_options[$(( end + ${#meta_options[@]} + 1 ))]=E
+            echo "$(( end + ${#meta_options[@]} ))/E) Next page" >&2
         fi
 
         local selection
@@ -217,24 +218,29 @@ user_selection() {
                 return 0
             fi
         done
-        if [[ "$start" -gt 1 && "$selection" =~ ^[Vv]$ ]] || (( start > 1 && selection == end + 1 )); then
+
+        if [[ "$selection" =~ ^[0-9]+$ ]]; then
+            selection=${meta_options[$selection]}
+        elif [[ ! "$selection" =~ ^[EeQqVvWw]$ ]]; then
+            invalid_selection=true
+            continue
+        fi
+
+        if (( start > 1 )) && [[ "$selection" =~ ^[Vv]$ ]]; then
             start=${starts[-1]}
             end=${ends[-1]}
-            unset starts[-1] ends[-1]
-            continue
-        elif [[ "$start" -gt 1 && "$selection" =~ ^[Qq]$ ]] || (( start > 1 && selection == end + 2 )); then
+            unset "starts[-1]" "ends[-1]"
+        elif (( start > 1 )) && [[ "$selection" =~ ^[Qq]$ ]]; then
             start=1
             end=${ends[0]}
             unset starts ends
-            continue
-        elif [[ "$end" -lt "${#option_strings[@]}" && "$selection" =~ ^[Ee]$ ]] || (( end < ${#option_strings[@]} && selection == end + meta_options - 1 )); then
+        elif (( end < ${#option_strings[@]} )) && [[ "$selection" =~ ^[Ee]$ ]]; then
             starts+=( "$start" )
             ends+=( "$end" )
             start=$(( end + 1 ))
             end=$(awk -v start="$start" -v lines="$term_lines" -v options=${#option_strings[@]} -v rsv="$reserved" \
                 'BEGIN { options < start + lines - rsv ? end = options : end = start + lines - rsv; print end }')
-            continue
-        elif [[ "$end" -lt "${#option_strings[@]}" && "$selection" =~ ^[Ww]$ ]] || (( end < ${#option_strings[@]} && selection == end + meta_options )); then
+        elif (( end < ${#option_strings[@]} )) && [[ "$selection" =~ ^[Ww]$ ]]; then
             while (( end < ${#option_strings[@]} )); do
                 starts+=( "$start" )
                 ends+=( "$end" )
@@ -242,9 +248,9 @@ user_selection() {
                 end=$(awk -v start="$start" -v lines="$term_lines" -v options=${#option_strings[@]} -v rsv="$reserved" \
                     'BEGIN { options < start + lines - rsv ? end = options : end = start + lines - rsv; print end }')
             done
-            continue
+        else
+            invalid_selection=true
         fi
-        invalid_selection=true
     done
 }
 
@@ -275,7 +281,7 @@ select_program() {
     fi
     numbered_options_list_option "Quit" "U"
 
-    program_selection=$(user_selection --printinfo "Selection: ")
+    program_selection=$(user_selection "Selection: ")
     echo
     case "$program_selection" in
         A|a)
@@ -330,30 +336,34 @@ select_program() {
             exit 0
             ;;
         R|r)
-            start_numbered_options_list "Input timestamps manually or have them randomly generated?"
-            numbered_options_list_option "Manual timestamps" "M"
-            numbered_options_list_option "Random timestamps" "R"
-            numbered_options_list_option "Cancel and return to main menu" "C"
-            local timestamp_selection
-            timestamp_selection=$(user_selection "Selection: ")
-            echo
-            if [[ "$timestamp_selection" =~ ^[Mm]$ ]]; then
-                user_timestamps
-            elif [[ "$timestamp_selection" =~ ^[Rr]$ ]]; then
-                if ! random_timestamps; then
-                    warn "Something went wrong with random timestamps"
-                    return 1
-                fi
-            elif [[ "$timestamp_selection" =~ ^[Cc]$ ]]; then
-                return 0
-            else
-                errr "Unexpected condition occurred: timestamp_selection='$timestamp_selection'"
-            fi
+            generate_timestamps
             create_clip
             ;;
         *)
             return 1 ;;
     esac
+}
+
+generate_timestamps() {
+    start_numbered_options_list "Input timestamps manually or have them randomly generated?"
+    numbered_options_list_option "Manual timestamps" "M"
+    numbered_options_list_option "Random timestamps" "R"
+    numbered_options_list_option "Cancel and return to main menu" "C"
+    local timestamp_selection
+    timestamp_selection=$(user_selection "Selection: ")
+    echo
+    if [[ "$timestamp_selection" =~ ^[Mm]$ ]]; then
+        user_timestamps
+    elif [[ "$timestamp_selection" =~ ^[Rr]$ ]]; then
+        if ! random_timestamps; then
+            warn "Something went wrong with random timestamps"
+            return 1
+        fi
+    elif [[ "$timestamp_selection" =~ ^[Cc]$ ]]; then
+        return 0
+    else
+        errr "Unexpected condition occurred: timestamp_selection='$timestamp_selection'"
+    fi
 }
 
 # Add track and X-test result information to the list of results
@@ -469,9 +479,8 @@ search_next_track() {
         esac
     done
     generate_track_details
-    until user_timestamps; do
-        warn "Something went wrong when trying to set user timestamps"
-    done
+    generate_timestamps
+    create_clip
 }
 
 # Takes as input a UTF8 array
@@ -630,6 +639,7 @@ random_next_track() {
         track_index=0
     fi
     random_timestamps
+    create_clip
 }
 
 # Read and store track metadata such as duration, title, album, artist, bitrate, and encoding format
@@ -884,26 +894,24 @@ x_test() {
     fi
     if ! "$forfeit"; then
         while [[ ! "$confirmation" =~ ^[Yy]$ ]]; do
-            echo
-            start_numbered_options_list "Which did you just hear?"
+            start_numbered_options_list "Which quality level do you hear?"
             numbered_options_list_option "Original quality" "O"
             numbered_options_list_option "Lossy compression" "L"
             local guess
             guess=$(user_selection "Selection: ")
-            echo
-            start_numbered_options_list "Are you sure?"
+            if [[ "$guess" =~ ^[Oo]$ ]]; then
+                local guess_fmt=original
+            elif [[ "$guess" =~ ^[Ll]$ ]]; then
+                local guess_fmt=lossy
+            else
+                errr "Unexpected condition occurred: guess='$guess'"
+            fi
+            start_numbered_options_list "You guessed $guess_fmt. Are you sure?"
             numbered_options_list_option "Yes" "Y"
             numbered_options_list_option "No" "N"
             local confirmation
             confirmation=$(user_selection "Selection: ")
         done
-        if [[ "$guess" =~ ^[Oo]$ ]]; then
-            local guess_fmt=original
-        elif [[ "$guess" =~ ^[Ll]$ ]]; then
-            local guess_fmt=lossy
-        else
-            errr "Unexpected condition occurred: guess='$guess'"
-        fi
         echo
         if [[ "$guess_fmt" == "$format" ]]; then
             echo "${GREEN}CORRECT!${NOCOLOR} The file was ${format^^} and your guess was ${guess_fmt^^}"
@@ -1017,8 +1025,8 @@ print_results() {
                 echo "Artist|Album|Title"
                 echo "${track_details_map["$track"]}"
             } | column -ts '|'
+            echo
         fi
-        echo
         echo "Bitrate: ${bitrate::-1} kbps"
         {
             echo "Number|Artist|Album|Track|Result|Guess"
