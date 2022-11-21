@@ -156,11 +156,12 @@ numbered_options_list_option() {
 # Prints the numbered options then prompts the user for input and validates against provided options
 user_selection() {
     local start=1
-    local reserved=7
+    local reserved=8
     local end=$(awk -v start="$start" -v lines="$term_lines" -v options=${#option_strings[@]} -v rsv="$reserved" \
               'BEGIN { options < start + lines - rsv ? end = options : end = start + lines - rsv; print end }')
     local starts=()
     local ends=()
+    local invalid_selection=false
     if [[ "$1" == --printinfo ]]; then
         local printinfo=true
         shift
@@ -169,11 +170,19 @@ user_selection() {
     fi
     while true; do
         if "$printinfo"; then
+            clear -x >&2
+            if "$invalid_selection"; then
+                warn "Invalid selection: '$selection'"
+            fi
             print_clip_info >&2
             echo >&2
         else
             clear -x >&2
+            if "$invalid_selection"; then
+                warn "Invalid selection: '$selection'"
+            fi
         fi
+        invalid_selection=false
 
         [[ "$header" ]] && echo "$header" >&2
         for i in $(seq "$start" "$end"); do
@@ -192,6 +201,7 @@ user_selection() {
         local selection
         read -rp "$1" selection
         if [[ -z "$selection" ]]; then
+            invalid_selection=true
             continue
         fi
         for option_number in $(seq "$start" "$end"); do
@@ -211,16 +221,19 @@ user_selection() {
             start=${starts[-1]}
             end=${ends[-1]}
             unset starts[-1] ends[-1]
+            continue
         elif [[ "$start" -gt 1 && "$selection" =~ ^[Qq]$ ]] || (( start > 1 && selection == end + 2 )); then
             start=1
             end=${ends[0]}
             unset starts ends
+            continue
         elif [[ "$end" -lt "${#option_strings[@]}" && "$selection" =~ ^[Ee]$ ]] || (( end < ${#option_strings[@]} && selection == end + meta_options - 1 )); then
             starts+=( "$start" )
             ends+=( "$end" )
             start=$(( end + 1 ))
             end=$(awk -v start="$start" -v lines="$term_lines" -v options=${#option_strings[@]} -v rsv="$reserved" \
                 'BEGIN { options < start + lines - rsv ? end = options : end = start + lines - rsv; print end }')
+            continue
         elif [[ "$end" -lt "${#option_strings[@]}" && "$selection" =~ ^[Ww]$ ]] || (( end < ${#option_strings[@]} && selection == end + meta_options )); then
             while (( end < ${#option_strings[@]} )); do
                 starts+=( "$start" )
@@ -229,7 +242,9 @@ user_selection() {
                 end=$(awk -v start="$start" -v lines="$term_lines" -v options=${#option_strings[@]} -v rsv="$reserved" \
                     'BEGIN { options < start + lines - rsv ? end = options : end = start + lines - rsv; print end }')
             done
+            continue
         fi
+        invalid_selection=true
     done
 }
 
@@ -437,6 +452,7 @@ reset_score() {
 
 search_next_track() {
     action=artist
+    nomatch=false
     while true; do
         case "$action" in
             artist) unset matched_artists
@@ -474,6 +490,10 @@ utf8_array_search() {
 
 # Search for an artist with a given string
 artist_search() {
+    clear -x
+    if "$nomatch"; then
+        warn "No artists matched the search string provided."
+    fi
     local search_string
     read -rp "Artist search string: " search_string
 
@@ -481,9 +501,11 @@ artist_search() {
     mapfile -t matched_artist_indices < <(utf8_array_search "${all_artists[@]}")
 
     if (( ${#matched_artist_indices[@]} == 0 )); then
-        warn "No artists matched the search string '$search_string'"
+        nomatch=true
         return 1
     fi
+
+    nomatch=false
 
     start_numbered_options_list
     for index in "${matched_artist_indices[@]}"; do
@@ -509,6 +531,7 @@ artist_search() {
 
 # Search for an album with a given string
 album_search() {
+    clear -x
     unset album_selection count
     start_numbered_options_list
     local search_string
@@ -551,6 +574,7 @@ album_search() {
 
 # Search for a track with a given string
 track_search() {
+    clear -x
     local -a tracks matched_tracks matched_track_indices
     local search_string artist_name album_name track_name track_number track_selection
     local findopts=( -mindepth 1 -maxdepth 1 -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" )
@@ -972,7 +996,6 @@ save_clip() {
 
 # Print out details about the clip
 print_clip_info() {
-    clear -x
     echo "Clip information"
     echo "Artist: ${artists_map["$track"]}"
     echo "Album: ${albums_map["$track"]}"
@@ -1013,6 +1036,7 @@ print_results() {
 
 # Trap function to run on exit, displaying the results and deleting all files used
 show_results_and_cleanup() {
+    clear -x
     print_results
     cleanup_async &
 }
