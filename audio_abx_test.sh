@@ -82,9 +82,9 @@ main() {
     else
         errr "Unexpected condition occurred: source_quality='$source_quality'"
     fi
-    mapfile -t all_artists < <(find "$music_dir" -mindepth 1 -maxdepth 1 -type d -not -name "MusicBee" | sort)
-    mapfile -t all_albums < <(find "$music_dir" -mindepth 2 -maxdepth 2 -type d | sort)
-    mapfile -t all_tracks < <(find "$music_dir" -type f -regextype egrep -iregex ".*\.($audio_file_extensions)")
+    mapfile -t all_artists < <(find "$music_dir" -mindepth 3 -maxdepth 3 -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" | sed 's|/[^/]*/[^/]*$||' | sort -u)
+    mapfile -t all_albums < <(find "$music_dir" -mindepth 3 -maxdepth 3 -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" | sed 's|/[^/]*$||' | sort -u)
+    mapfile -t all_tracks < <(find "$music_dir" -mindepth 3 -maxdepth 3 -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" | sort)
 
     if (( ${#all_tracks[@]} == 0 )); then
         errr "No tracks were found in '$music_dir'"
@@ -544,10 +544,11 @@ album_search() {
     unset album_selection count
     start_numbered_options_list
     local search_string
+    local findopts=( -mindepth 2 -maxdepth 2 -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" )
     read -rp "Album search string: " search_string
     local -a albums
     if [[ "$artist" ]]; then
-        mapfile -t albums < <(find "${matched_artists[@]}" -mindepth 1 -maxdepth 1 -type d)
+        mapfile -t albums < <(find "${matched_artists[@]}" "${findopts[@]}" | sed 's|/[^/]*$||' | sort -u)
     else
         albums=( "${all_albums[@]}" )
     fi
