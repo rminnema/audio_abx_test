@@ -118,12 +118,7 @@ main() {
         x_test_attempted=false
         x_test_completed=false
         while true; do
-            print_clip_info
-            while ! select_program; do
-                warn "Invalid selection '$program_selection'"
-                read -rsp "Press enter to continue:" _
-                print_clip_info
-            done
+            select_program
             if [[ "$program_selection" =~ ^[NnFf]$ ]]; then
                 break
             fi
@@ -166,15 +161,19 @@ user_selection() {
               'BEGIN { options < start + lines - rsv ? end = options : end = start + lines - rsv; print end }')
     local starts=()
     local ends=()
-    if [[ "$1" == --noclear ]]; then
-        local clearscreen=false
+    if [[ "$1" == --printinfo ]]; then
+        local printinfo=true
         shift
     else
-        local clearscreen=true
+        local printinfo=false
     fi
     while true; do
-        echo >&2
-        "$clearscreen" && clear -x >&2
+        if "$printinfo"; then
+            print_clip_info >&2
+            echo >&2
+        else
+            clear -x >&2
+        fi
 
         [[ "$header" ]] && echo "$header" >&2
         for i in $(seq "$start" "$end"); do
@@ -261,7 +260,7 @@ select_program() {
     fi
     numbered_options_list_option "Quit" "U"
 
-    program_selection=$(user_selection --noclear "Selection: ")
+    program_selection=$(user_selection --printinfo "Selection: ")
     echo
     case "$program_selection" in
         A|a)
