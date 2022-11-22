@@ -82,9 +82,12 @@ main() {
     else
         errr "Unexpected condition occurred: source_quality='$source_quality'"
     fi
-    mapfile -t all_artists < <(find "$music_dir" -mindepth 3 -maxdepth 3 -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" | sed 's|/[^/]*/[^/]*$||' | sort -u)
-    mapfile -t all_albums < <(find "$music_dir" -mindepth 3 -maxdepth 3 -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" | sed 's|/[^/]*$||' | sort -u)
-    mapfile -t all_tracks < <(find "$music_dir" -mindepth 3 -maxdepth 3 -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" | sort)
+    find_extensions=( -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" )
+    mapfile -t all_artists < \
+        <(find "$music_dir" -mindepth 3 -maxdepth 3 "${find_extensions[@]}" | sed 's|/[^/]*/[^/]*$||' | sort -u)
+    mapfile -t all_albums < \
+        <(find "$music_dir" -mindepth 3 -maxdepth 3 "${find_extensions[@]}" | sed 's|/[^/]*$||' | sort -u)
+    mapfile -t all_tracks < <(find "$music_dir" -mindepth 3 -maxdepth 3 "${find_extensions[@]}" | sort)
 
     if (( ${#all_tracks[@]} == 0 )); then
         errr "No tracks were found in '$music_dir'"
@@ -160,8 +163,9 @@ user_selection() {
     local starts=()
     local ends=()
     local invalid_selection=false
-    if [[ "${FUNCNAME[1]}" == select_program ]]; then
+    if [[ "$1" == '--printinfo' ]]; then
         local printinfo=true
+        shift
     else
         local printinfo=false
     fi
@@ -281,7 +285,7 @@ select_program() {
     fi
     numbered_options_list_option "Quit" "U"
 
-    program_selection=$(user_selection "Selection: ")
+    program_selection=$(user_selection --printinfo "Selection: ")
     echo
     case "$program_selection" in
         A|a)
@@ -350,7 +354,7 @@ generate_timestamps() {
     numbered_options_list_option "Random timestamps" "R"
     numbered_options_list_option "Cancel and return to main menu" "C"
     local timestamp_selection
-    timestamp_selection=$(user_selection "Selection: ")
+    timestamp_selection=$(user_selection --printinfo "Selection: ")
     echo
     if [[ "$timestamp_selection" =~ ^[Mm]$ ]]; then
         user_timestamps
@@ -524,15 +528,19 @@ artist_search() {
         matched_artists+=( "$artist" )
     done
     (( ${#matched_artists[@]} > 1 )) && numbered_options_list_option "Search albums of all above artists" "A"
+    numbered_options_list_option "Random track from the above artists" "N"
     numbered_options_list_option "Retry search artist again" "R"
 
     local artist_selection
     artist_selection=$(user_selection "Select an artist to search their albums: ")
     if (( artist_selection == count )) || [[ "$artist_selection" =~ ^[Rr]$ ]]; then
         action=artist
-    elif (( ${#matched_artists[@]} > 1 && artist_selection == count - 1 )) || [[ "$artist_selection" =~ ^[Aa]$ ]]; then
+    elif (( artist_selection == count - 1 )) || [[ "$artist_selection" =~ ^[Nn]$ ]]; then
+        track=$(find "${matched_artists[@]}" -mindepth 2 -maxdepth 2 "${find_extensions[@]}" | sort -R | head -n 1)
+        action=selected
+    elif (( ${#matched_artists[@]} > 1 && artist_selection == count - 2 )) || [[ "$artist_selection" =~ ^[Aa]$ ]]; then
         action=album
-    elif (( artist_selection <= count - 1 )); then
+    elif (( artist_selection <= count - 2 )); then
         matched_artists=( "${matched_artists[$(( artist_selection - 1 ))]}" ) # Search albums of a single artist
         action=album
     fi
@@ -544,7 +552,7 @@ album_search() {
     unset album_selection count
     start_numbered_options_list
     local search_string
-    local findopts=( -mindepth 2 -maxdepth 2 -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" )
+    local findopts=( -mindepth 2 -maxdepth 2 "${find_extensions[@]}" )
     read -rp "Album search string: " search_string
     local -a albums
     if [[ "$artist" ]]; then
@@ -565,6 +573,7 @@ album_search() {
         matched_albums+=( "$album" )
     done
     (( ${#matched_albums[@]} > 1 )) && numbered_options_list_option "Search tracks of above albums" "A"
+    numbered_options_list_option "Random track from the above albums" "N"
     numbered_options_list_option "Search album again" "L"
     numbered_options_list_option "Search artist again" "R"
 
@@ -574,9 +583,12 @@ album_search() {
         action=artist
     elif (( album_selection == count - 1 )) || [[ "$album_selection" =~ ^[Ll]$ ]]; then
         action=album
-    elif (( ${#matched_albums[@]} > 1 && album_selection == count - 2 )) || [[ "$album_selection" =~ ^[Aa]$ ]]; then
+    elif (( album_selection == count - 2 )) || [[ "$album_selection" =~ ^[Nn]$ ]]; then
+        track=$(find "${matched_albums[@]}" -mindepth 1 -maxdepth 1 "${find_extensions[@]}" | sort -R | head -n 1)
+        action=selected
+    elif (( ${#matched_albums[@]} > 1 && album_selection == count - 3 )) || [[ "$album_selection" =~ ^[Aa]$ ]]; then
         action=track
-    elif (( album_selection <= count - 2 )); then
+    elif (( album_selection <= count - 3 )); then
         matched_albums=( "${matched_albums[$(( album_selection - 1 ))]}" ) # Search one album
         action=track
     fi
@@ -587,7 +599,7 @@ track_search() {
     clear -x
     local -a tracks matched_tracks matched_track_indices
     local search_string artist_name album_name track_name track_number track_selection
-    local findopts=( -mindepth 1 -maxdepth 1 -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" )
+    local findopts=( -mindepth 1 -maxdepth 1 "${find_extensions[@]}" )
     start_numbered_options_list
     read -rp "Track title search string: " search_string
     if (( ${#matched_albums[@]} > 0 )); then
@@ -612,6 +624,7 @@ track_search() {
         numbered_options_list_option "$list_option"
         matched_tracks+=( "$track" )
     done
+    numbered_options_list_option "Random track from above" "N"
     numbered_options_list_option "Search track again" "T"
     numbered_options_list_option "Search album again" "L"
     numbered_options_list_option "Search artist again" "R"
@@ -623,6 +636,9 @@ track_search() {
         action=album
     elif (( track_selection == count - 2 )) || [[ "$track_selection" =~ ^[Tt]$ ]]; then
         action=track
+    elif (( track_selection == count - 3 )) || [[ "$track_selection" =~ ^[Nn]$ ]]; then
+        track=$(IFS=$'\n'; sort -R <<< "${matched_tracks[*]}" | head -n 1)
+        action=selected
     else
         track="${matched_tracks[$(( track_selection - 1 ))]}"
         generate_track_details
@@ -758,7 +774,6 @@ seconds_to_timespec() {
 user_timestamps() {
     unset startsec endsec
     local startts endts
-    info "Track duration: $(seconds_to_timespec "${durations_map["$track"]}")"
     while [[ -z "$startsec" ]]; do
         read -rp "Start timestamp: " startts
         if [[ -z "$startts" || "$startts" =~ ^[Rr]$ ]]; then
@@ -1012,7 +1027,7 @@ print_clip_info() {
     echo "Avg. Bitrate: ${bitrate_map["$track"]} kbps"
     echo "Format: ${format_map["$track"]}"
     echo "Track duration: $(seconds_to_timespec "${durations_map["$track"]}")"
-    echo "Clip from $(seconds_to_timespec "$startsec") - $(seconds_to_timespec "$endsec")"
+    [[ "$startsec" ]] && echo "Clip from $(seconds_to_timespec "$startsec") - $(seconds_to_timespec "$endsec")"
 }
 
 # Generate a printout of the results, showing all tracks that have been presented so far
