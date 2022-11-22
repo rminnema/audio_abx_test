@@ -967,7 +967,7 @@ save_clip() {
         errr "Unexpected condition occurred: save_choice_1='$save_choice_1'"
     fi
     start_numbered_options_list "Select a file format to save in."
-    numbered_options_list_option "Save as WAV" "W"
+    numbered_options_list_option "Save as WAV" "A"
     numbered_options_list_option "Save as FLAC" "F"
     numbered_options_list_option "Cancel and return to main menu" "C"
     local save_choice_2
