@@ -352,7 +352,9 @@ generate_timestamps() {
     start_numbered_options_list "Input timestamps manually or have them randomly generated?"
     numbered_options_list_option "Manual timestamps" "M"
     numbered_options_list_option "Random timestamps" "R"
-    numbered_options_list_option "Cancel and return to main menu" "C"
+    if [[ "${FUNCNAME[1]}" == "select_program" ]]; then
+        numbered_options_list_option "Cancel and return to main menu" "C"
+    fi
     local timestamp_selection
     timestamp_selection=$(user_selection --printinfo "Selection: ")
     echo
@@ -972,7 +974,7 @@ save_clip() {
     numbered_options_list_option "Cancel and return to main menu" "C"
     local save_choice_2
     save_choice_2=$(user_selection "Selection: ")
-    if [[ "$save_choice_2" =~ ^[Ww]$ ]]; then
+    if [[ "$save_choice_2" =~ ^[Aa]$ ]]; then
         local file_fmt=wav
     elif [[ "$save_choice_2" =~ ^[Ff]$ ]]; then
         local file_fmt=flac
@@ -995,7 +997,7 @@ save_clip() {
         wait "$create_clip_pid"
     fi
     echo
-    if [[ "$save_choice_2" =~ ^[Ww]$ ]]; then
+    if [[ "$save_choice_2" =~ ^[Aa]$ ]]; then
         if cp "$clip_to_save" "$save_file"; then
             echo "${compression^} clip saved to:"
             echo "$save_file"
@@ -1020,7 +1022,6 @@ save_clip() {
 
 # Print out details about the clip
 print_clip_info() {
-    echo "Clip information"
     echo "Artist: ${artists_map["$track"]}"
     echo "Album: ${albums_map["$track"]}"
     echo "Title: ${titles_map["$track"]}"
