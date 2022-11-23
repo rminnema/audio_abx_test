@@ -679,19 +679,19 @@ generate_track_details() {
         return 0
     fi
     if [[ "${ffprobe:?}" == *ffprobe.exe ]]; then
-        local ffprobe_track && ffprobe_track=$(wslpath -w "$track")
+        local ffprobe_track=$(wslpath -w "$track")
     else
         local ffprobe_track=$track
     fi
 
     local fmt="default=noprint_wrappers=1:nokey=1"
     local ffprobe_opts=( -v fatal -select_streams a -show_entries "stream=duration" -of "$fmt" "$ffprobe_track" )
-    local track_duration && track_duration=$("${ffprobe:?}" "${ffprobe_opts[@]}" | sed 's/\r//g')
-    local track_duration_int && track_duration_int=$(grep -Eo "^[0-9]*" <<< "$track_duration")
+    local track_duration=$("${ffprobe:?}" "${ffprobe_opts[@]}" | sed 's/\r//g')
+    local track_duration_int=$(grep -Eo "^[0-9]*" <<< "$track_duration")
     durations_map["$track"]=$track_duration_int
 
     if [[ "${mediainfo:?}" == *mediainfo.exe ]]; then
-        local mediainfo_track && mediainfo_track=$(wslpath -w "$track")
+        local mediainfo_track=$(wslpath -w "$track")
     else
         local mediainfo_track=$track
     fi
@@ -751,9 +751,9 @@ cleanup_async() {
 # Obfuscate both original quality and lossy clips as .wav so it cannot easily be determined which is the X file
 create_clip_async() {
     if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
-        local ffmpeg_track && ffmpeg_track=$(wslpath -w "$track")
-        local ffmpeg_original_clip && ffmpeg_original_clip=$(wslpath -w "$original_clip")
-        local ffmpeg_lossy_clip && ffmpeg_lossy_clip=$(wslpath -w "$lossy_clip")
+        local ffmpeg_track=$(wslpath -w "$track")
+        local ffmpeg_original_clip=$(wslpath -w "$original_clip")
+        local ffmpeg_lossy_clip=$(wslpath -w "$lossy_clip")
     else
         local ffmpeg_track=$track
         local ffmpeg_original_clip=$original_clip
@@ -998,9 +998,9 @@ save_clip() {
     local artist=${artists_map["$track"]}
     local album=${albums_map["$track"]}
     local title=${titles_map["$track"]}
-    local save_file_basename && save_file_basename=$(sed 's|/|-|g' <<< "$artist -- $album -- $title")
-    local start_ts && start_ts=$(seconds_to_timespec "$startsec" | tr -d ':')
-    local end_ts && end_ts=$(seconds_to_timespec "$endsec" | tr -d ':')
+    local save_file_basename=$(sed 's|/|-|g' <<< "$artist -- $album -- $title")
+    local start_ts=$(seconds_to_timespec "$startsec" | tr -d ':')
+    local end_ts=$(seconds_to_timespec "$endsec" | tr -d ':')
     local save_file="$clips_dir/$save_file_basename -- $compression.$start_ts.$end_ts.$file_fmt"
 
     if kill -0 "$create_clip_pid" 2>/dev/null; then
