@@ -189,18 +189,24 @@ user_selection() {
         for i in $(seq "$start" "$end"); do
             echo "${option_strings[$(( i - 1 ))]}" >&2
         done
-        local meta_options=()
+        unset meta_options
+        local -a meta_options
+        local index
         if (( start > 1 )); then
-            meta_options[$(( end + ${#meta_options[@]} + 1 ))]=Q
-            echo "$(( end + ${#meta_options[@]} ))/Q) First page" >&2
-            meta_options[$(( end + ${#meta_options[@]} + 1 ))]=V
-            echo "$(( end + ${#meta_options[@]} ))/V) Previous page" >&2
+            meta_options+=( "Q" )
+            index=$(( end + ${#meta_options[@]} ))
+            echo "$index/Q) First page" >&2
+            meta_options+=( "V" )
+            index=$(( end + ${#meta_options[@]} ))
+            echo "$index/V) Previous page" >&2
         fi
         if (( end < ${#option_strings[@]} )); then
-            meta_options[$(( end + ${#meta_options[@]} + 1 ))]=W
-            echo "$(( end + ${#meta_options[@]} ))/W) Last page" >&2
-            meta_options[$(( end + ${#meta_options[@]} + 1 ))]=E
-            echo "$(( end + ${#meta_options[@]} ))/E) Next page" >&2
+            meta_options+=( "W" )
+            index=$(( end + ${#meta_options[@]} ))
+            echo "$index/W) Last page" >&2
+            meta_options+=( "E" )
+            index=$(( end + ${#meta_options[@]} ))
+            echo "$index/E) Next page" >&2
         fi
 
         local selection
@@ -224,7 +230,13 @@ user_selection() {
         done
 
         if [[ "$selection" =~ ^[0-9]+$ ]]; then
-            selection=${meta_options[$selection]}
+            local meta_index=$(( selection - end - 1 ))
+            if (( meta_index >= 0 )); then
+                selection=${meta_options[$meta_index]}
+            else
+                invalid_selection=true
+                continue
+            fi
         elif [[ ! "$selection" =~ ^[EeQqVvWw]$ ]]; then
             invalid_selection=true
             continue
@@ -372,7 +384,7 @@ generate_timestamps() {
     fi
 }
 
-# Add track and X-test result information to the list of results
+# Add track and test result information to the list of results
 add_result() {
     local track_info=${track_details_map["$track"]}
     local numresults=$(( ${#results[@]} + 1 ))
