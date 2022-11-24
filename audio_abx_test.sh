@@ -818,7 +818,7 @@ parse_time_to_seconds() {
     local timespec=$1
     if [[ "$timespec" =~ ^[0-9:]*$ ]]; then
         local seconds minutes hours
-        read -r seconds minutes hours _ < <(awk -F ':' '{ for (i=NF;i>0;i--) printf("%s ",$i)}' <<< "$timespec")
+        read -r seconds minutes hours < <(awk -F ':' '{ for (i=0;i<3;i++) printf("%s ",$(NF - i))}' <<< "$timespec")
         seconds=${seconds:-0}
         minutes=${minutes:-0}
         hours=${hours:-0}
