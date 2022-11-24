@@ -106,14 +106,15 @@ main() {
 
     declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
     while true; do
-        if kill -0 "$create_clip_pid" 2>/dev/null; then
-            kill "$create_clip_pid" 2>/dev/null
-        fi
+        cleanup_async &
         if [[ "$fully_random" =~ ^[Yy]$ ]] || "$next_track_is_random"; then
             random_next_track
         else
             search_next_track
         fi
+        generate_track_details
+        generate_timestamps
+        create_clip
 
         x_clip_quality=$(( RANDOM%2 ))
         x_test_attempted=false
@@ -327,6 +328,7 @@ select_program() {
         P|p)
             print_results ;;
         C|c)
+            cleanup_async &
             select_mp3_bitrate
             create_clip
             ;;
@@ -352,6 +354,7 @@ select_program() {
             exit 0
             ;;
         R|r)
+            cleanup_async &
             generate_timestamps
             create_clip
             ;;
@@ -362,8 +365,8 @@ select_program() {
 
 generate_timestamps() {
     start_numbered_options_list "Input timestamps manually or have them randomly generated?"
-    numbered_options_list_option "Manual timestamps" "M"
     numbered_options_list_option "Random timestamps" "R"
+    numbered_options_list_option "Manual timestamps" "M"
     if [[ "${FUNCNAME[1]}" == "select_program" ]]; then
         numbered_options_list_option "Cancel and return to main menu" "C"
     fi
@@ -382,6 +385,7 @@ generate_timestamps() {
     else
         errr "Unexpected condition occurred: timestamp_selection='$timestamp_selection'"
     fi
+    sanitize_timestamps
 }
 
 # Add track and test result information to the list of results
@@ -476,6 +480,8 @@ reset_score() {
     incorrect=0
     skipped=0
     results=()
+    x_test_attempted=false
+    x_test_completed=false
 }
 
 search_next_track() {
@@ -496,9 +502,6 @@ search_next_track() {
                     break ;;
         esac
     done
-    generate_track_details
-    generate_timestamps
-    create_clip
 }
 
 # Takes as input a UTF8 array
@@ -665,12 +668,9 @@ track_search() {
 random_next_track() {
     random_index=${random_order[$track_index]}
     track=${all_tracks[$random_index]}
-    generate_track_details
     if (( ++track_index >= ${#all_tracks[@]} )); then
         track_index=0
     fi
-    random_timestamps
-    create_clip
 }
 
 # Read and store track metadata such as duration, title, album, artist, bitrate, and encoding format
@@ -724,8 +724,6 @@ ellipsize() {
 
 # Wrapper around the async portion, allocates the temp filenames
 create_clip() {
-    cleanup_async &
-
     original_clip=$(mktemp --suffix=.wav)
     lossy_clip=$(mktemp --suffix=.wav)
     tmp_mp3=$(mktemp --suffix=.mp3)
@@ -776,7 +774,6 @@ random_timestamps() {
     fi
     startsec=$(shuf -i 0-"$(( track_duration_int - clip_duration ))" -n 1 --random-source=/dev/urandom)
     endsec=$(( startsec + clip_duration ))
-    sanitize_timestamps
 }
 
 # Convert seconds to a string in the form of HH:MM:SS for HH > 00 or else MM:SS
@@ -814,9 +811,6 @@ user_timestamps() {
             endsec=$(parse_time_to_seconds "$endts") || unset endsec
         fi
     done
-
-    sanitize_timestamps
-    echo
 }
 
 # Convert a time given in [[HH:]MM:]SS to seconds
@@ -911,7 +905,7 @@ x_test() {
     numbered_options_list_option "Retry" "R"
     numbered_options_list_option "Forfeit" "F"
     local retry_guess_forfeit
-    retry_guess_forfeit=$(user_selection "Selection: ")
+    retry_guess_forfeit=$(user_selection --printinfo "Selection: ")
     if [[ "$retry_guess_forfeit" =~ ^[Rr]$ ]]; then
         return 0
     elif [[ "$retry_guess_forfeit" =~ ^[Ff]$ ]]; then
@@ -928,7 +922,7 @@ x_test() {
             numbered_options_list_option "Original quality" "O"
             numbered_options_list_option "Lossy compression" "L"
             local guess
-            guess=$(user_selection "Selection: ")
+            guess=$(user_selection --printinfo "Selection: ")
             if [[ "$guess" =~ ^[Oo]$ ]]; then
                 local guess_fmt=original
             elif [[ "$guess" =~ ^[Ll]$ ]]; then
@@ -940,7 +934,7 @@ x_test() {
             numbered_options_list_option "Yes" "Y"
             numbered_options_list_option "No" "N"
             local confirmation
-            confirmation=$(user_selection "Selection: ")
+            confirmation=$(user_selection --printinfo "Selection: ")
         done
         echo
         if [[ "$guess_fmt" == "$format" ]]; then
@@ -1047,8 +1041,8 @@ print_clip_info() {
 # Along with the results and guesses for each X test
 print_results() {
     if (( ${#results[@]} > 0 )); then
+        clear -x
         if [[ -z "$quit" ]]; then
-            clear -x
             echo "Current track info:"
             {
                 echo "Artist|Album|Title"
@@ -1073,9 +1067,8 @@ print_results() {
 
 # Trap function to run on exit, displaying the results and deleting all files used
 show_results_and_cleanup() {
-    clear -x
-    print_results
     cleanup_async &
+    print_results
 }
 
 main "$@"
