@@ -514,7 +514,6 @@ utf8_array_search() {
         awk -F ':' '{ print $1 }' |
         sed 's/$/ - 1/' |
         bc
-    IFS=$' \t\n'
 }
 
 # Search for an artist with a given string
