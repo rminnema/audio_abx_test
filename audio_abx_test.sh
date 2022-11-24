@@ -102,7 +102,6 @@ main() {
     max_idx=$(( ${#all_tracks[@]} - 1 ))
     mapfile -t random_order < <(shuf -i 0-"$max_idx" --random-source=/dev/urandom)
     next_track_is_random=false
-    tmp_output=$(mktemp)
 
     declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
     while true; do
@@ -742,7 +741,7 @@ cleanup_async() {
     while kill -0 "$create_clip_pid" 2>/dev/null; do
         sleep 0.1
     done
-    rm -f "$original_clip" "$lossy_clip" "$tmp_mp3" "$x_clip" "$tmp_output"
+    rm -f "$original_clip" "$lossy_clip" "$tmp_mp3" "$x_clip"
 }
 
 # Create an original-quality clip and a lossy clip from a given track at the given timestamps
