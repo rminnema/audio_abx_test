@@ -33,14 +33,20 @@ main() {
                 config_file=$1
                 shift
                 ;;
+            --default_duration)
+                default_duration=$1
+                shift
+                ;;
             *)
-                errr "Unrecognized parameter '$param'"
+                errr "Unrecognized parameter '$param'" ;;
         esac
     done
     if [[ -f "$config_file" ]]; then
         [[ -d "$music_dir" ]] || music_dir=$(awk -F '=' '/^music_dir=/ { print $2 }' "$config_file")
         [[ -d "$clips_dir" ]] || clips_dir=$(awk -F '=' '/^clips_dir=/ { print $2 }' "$config_file")
+        [[ "$default_duration" ]] || default_duration=$(awk -F '=' '/^default_duration=/ { print $2 }' "$config_file")
     fi
+    default_duration=${default_duration:-30}
 
     if [[ ! -d "$music_dir" ]]; then
         errr "'$music_dir' directory does not exist."
@@ -413,7 +419,7 @@ add_result() {
 
 # Choose the MP3 bitrate for the lossy clip
 select_mp3_bitrate() {
-    clear -x
+    clear -x >&2
     start_numbered_options_list "Select a bitrate for MP3 compression of the lossy file."
     if [[ "$last_bitrate" ]]; then
         warn "Changing your bitrate will reset your score and progress."
@@ -518,7 +524,7 @@ utf8_array_search() {
 
 # Search for an artist with a given string
 artist_search() {
-    clear -x
+    clear -x >&2
     if "$nomatch"; then
         warn "No artists matched the search string provided."
     fi
@@ -563,7 +569,7 @@ artist_search() {
 
 # Search for an album with a given string
 album_search() {
-    clear -x
+    clear -x >&2
     unset album_selection count
     start_numbered_options_list
     local search_string
@@ -611,7 +617,7 @@ album_search() {
 
 # Search for a track with a given string
 track_search() {
-    clear -x
+    clear -x >&2
     local -a tracks matched_tracks matched_track_indices
     local search_string artist_name album_name track_name track_number track_selection
     local findopts=( -mindepth 1 -maxdepth 1 "${find_extensions[@]}" )
@@ -765,7 +771,7 @@ create_clip_async() {
 
 # Generate random timestamps to use for clipping
 random_timestamps() {
-    clip_duration=30
+    clip_duration=$default_duration
     local track_duration_int=${durations_map["$track"]}
     if (( track_duration_int < clip_duration)); then
         clip_duration=$track_duration_int
@@ -786,7 +792,7 @@ user_timestamps() {
     while [[ -z "$startsec" ]]; do
         read -rp "Start timestamp: " startts
         if [[ -z "$startts" || "$startts" =~ ^[Rr]$ ]]; then
-            info "Selecting random timestamp for a 30 second clip"
+            info "Selecting random timestamp for a $default_duration second clip"
             random_timestamps
             return 0
         elif [[ "$startts" =~ ^[SsFf]$ ]]; then
@@ -802,7 +808,7 @@ user_timestamps() {
     until [[ "$endsec" ]]; do
         read -rp "End timestamp: " endts
         if [[ -z "$endts" ]]; then
-            endsec=$(( startsec + 30 ))
+            endsec=$(( startsec + default_duration ))
         elif [[ "$endts" =~ ^[Ee]$ ]]; then
             endsec=${durations_map["$track"]}
         else
@@ -1039,7 +1045,7 @@ print_clip_info() {
 # Along with the results and guesses for each X test
 print_results() {
     if (( ${#results[@]} > 0 )); then
-        clear -x
+        clear -x >&2
         if [[ -z "$quit" ]]; then
             echo "Current track info:"
             {
