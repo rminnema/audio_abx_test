@@ -15,7 +15,6 @@ info() { printf "%sInfo:%s %s\n\n" "$BLUE" "$NOCOLOR" "$*" >&2; }
 main() {
     term_width=$(tput cols)
     term_lines=$(tput lines)
-    max_field_length=$(( (term_width - 32)/3 ))
     config_file="$HOME/audio_abx_test.cfg"
     while (( $# > 0 )); do
         param=$1
@@ -147,7 +146,7 @@ numbered_options_list_option() {
     local char=${2^^}
 
     if [[ "$char" && ! "$char" =~ ^[A-Z]$ ]] || [[ "$char" =~ [EQVW] ]]; then
-        errr "You may only provide single chars excluding E,Q,V, and W to the numbered_options_list_option function second parameter"
+        errr "Acceptable value for symbolic list option: A-Z excluding EQVW."
     fi
 
     if [[ "$char" ]]; then
@@ -206,7 +205,7 @@ user_selection() {
             index=$(( end + ${#meta_options[@]} ))
             echo "$index/V) Previous page" >&2
         fi
-        if (( end < ${#option_strings[@]} )); then
+        if (( end + 3 < ${#option_strings[@]} )); then
             meta_options+=( "W" )
             index=$(( end + ${#meta_options[@]} ))
             echo "$index/W) Last page" >&2
@@ -639,8 +638,11 @@ track_search() {
         track_name=$(basename "$track" | sed 's/^[0-9]* - //')
         album_name=$(awk -F '/' '{ print $(NF-1) }' <<< "$track")
         artist_name=$(awk -F '/' '{ print $(NF-2) }' <<< "$track")
+        local max_field_length=$(( (term_width - 10)/3 ))
         local list_option="$(ellipsize "$artist_name") - "
+        max_field_length=$(( (term_width - ${#list_option} - 7)/2 ))
         list_option+="$(ellipsize "$album_name") - "
+        max_field_length=$(( term_width - ${#list_option} - 4 ))
         list_option+="$(ellipsize "#$track_number - $track_name")"
         numbered_options_list_option "$list_option"
         matched_tracks+=( "$track" )
@@ -704,26 +706,23 @@ generate_track_details() {
     IFS='|' read -r track_artist track_album track_title track_bitrate track_format < \
             <("${mediainfo:?}" --output="$mediainfo_output" "$mediainfo_track")
 
-    track_artist_ellipsized=$(ellipsize "$track_artist")
-    track_album_ellipsized=$(ellipsize "$track_album")
-    track_title_ellipsized=$(ellipsize "$track_title")
+    local max_field_length=$(( (term_width - 32)/3 ))
+    track_artist_el=$(ellipsize "$track_artist")
+    track_album_el=$(ellipsize "$track_album")
+    track_title_el=$(ellipsize "$track_title")
 
     artists_map["$track"]=$track_artist
     albums_map["$track"]=$track_album
     titles_map["$track"]=$track_title
     bitrate_map["$track"]=$(( track_bitrate / 1024 ))
     format_map["$track"]=$track_format
-    track_details_map["$track"]="$track_artist_ellipsized|$track_album_ellipsized|$track_title_ellipsized"
+    track_details_map["$track"]="$track_artist_el|$track_album_el|$track_title_el"
 }
 
 # Truncates lengthy fields and adds ellipsis to indicate such
 ellipsize() {
-    local str=$*
-    if (( ${#str} > max_field_length + 3 )); then
-        cut -c 1-"$max_field_length" <<< "$str" | sed -e 's/\s*$//' -e 's/$/.../'
-    else
-        echo "$str"
-    fi
+    local cut_length=$(( max_field_length - 3 ))
+    sed -E "s/(.{$cut_length})..*$/\1.../" <<< "$*" | sed 's/\s*\.\.\.$/.../'
 }
 
 # Wrapper around the async portion, allocates the temp filenames
