@@ -176,7 +176,9 @@ user_selection() {
     local capacity=$(( term_lines - header_line - 1 ))
     local page=0
     indices[0]=1
-    while (( indices[-1] + term_lines - ${#reserved_options[-1]} - header_line - 1 < ${#option_strings[@]} )); do
+    # The output of `page_index 0` isn't the first index of page 0, but of the next page after the current end page
+    # Invoking the function this way is just convenient given how Bash handles negative array indices
+    while (( $(page_index 0) < ${#option_strings[@]} )); do
         if (( page == 0 )); then
             reserved_options[0]=E
             reserved_options[1]=V
