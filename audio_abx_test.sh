@@ -161,58 +161,89 @@ numbered_options_list_option() {
 
 # Prints the numbered options then prompts the user for input and validates against provided options
 user_selection() {
+    local ternary_condition="options < start + lines - rsv"
+    local ternary_then="end = options"
+    local ternary_else="end = start + lines - rsv"
     local start=1
-    local reserved=8
-    local end=$(awk -v start="$start" -v lines="$term_lines" -v options=${#option_strings[@]} -v rsv="$reserved" \
-              'BEGIN { options < start + lines - rsv ? end = options : end = start + lines - rsv; print end }')
-    local starts=()
-    local ends=()
-    local invalid_selection=false
+    local reserved=2
+    if (( start > 1 )); then
+        reserved=$(( reserved + 1 ))
+        echo "$start > 1" >&2
+    fi
+    if (( start > 2*term_lines - 3 )); then
+        reserved=$(( reserved + 1 ))
+        echo "$start > 2*$term_lines - 3" >&2
+    fi
+    if (( start + term_lines - 1 < ${#option_strings[@]} )); then
+        reserved=$(( reserved + 1 ))
+        echo "$start + $term_lines - 1 < ${#option_strings[@]}" >&2
+    fi
+    if (( start + 2*term_lines - 3 < ${#option_strings[@]} )); then
+        reserved=$(( reserved + 1 ))
+        echo "$start + 2*$term_lines - 3 < ${#option_strings[@]}"
+    fi
+    local end=$(
+        awk \
+        -v start="$start" \
+        -v lines="$term_lines" \
+        -v options=${#option_strings[@]} \
+        -v rsv="$reserved" \
+        "BEGIN { $ternary_condition ? $ternary_then : $ternary_else; print end }"
+    )
+    local -a starts
+    local -a ends
     if [[ "$1" == '--printinfo' ]]; then
         local printinfo=true
         shift
     else
         local printinfo=false
     fi
+    local invalid_selection=false
     while true; do
         if "$printinfo"; then
-            clear -x >&2
+            clear -x
             if "$invalid_selection"; then
                 warn "Invalid selection: '$selection'"
+                read -rsp "Press enter to continue" _
+                clear -x
             fi
-            print_clip_info >&2
-            echo >&2
+            print_clip_info
+            echo
         else
-            clear -x >&2
+            clear -x
             if "$invalid_selection"; then
                 warn "Invalid selection: '$selection'"
+                read -rsp "Press enter to continue" _
+                clear -x
             fi
-        fi
+        fi >&2
         invalid_selection=false
 
         [[ "$header" ]] && echo "$header" >&2
         for i in $(seq "$start" "$end"); do
-            echo "${option_strings[$(( i - 1 ))]}" >&2
-        done
+            echo "${option_strings[$(( i - 1 ))]}"
+        done >&2
         unset meta_options
         local -a meta_options
         local index
-        if (( start > 1 )); then
+        if (( start >= 2*(term_lines - reserved + 1) )); then
             meta_options+=( "Q" )
-            index=$(( end + ${#meta_options[@]} ))
-            echo "$index/Q) First page" >&2
+            echo "Q) First page"
+        fi >&2
+        if (( start > 1 )); then
             meta_options+=( "V" )
-            index=$(( end + ${#meta_options[@]} ))
-            echo "$index/V) Previous page" >&2
-        fi
-        if (( end + 3 < ${#option_strings[@]} )); then
+            echo "V) Previous page"
+        fi >&2
+        if (( end + term_lines + reserved < ${#option_strings[@]} )); then
             meta_options+=( "W" )
             index=$(( end + ${#meta_options[@]} ))
-            echo "$index/W) Last page" >&2
+            echo "W) Last page"
+        fi >&2
+        if (( end + reserved < ${#option_strings[@]} )); then
             meta_options+=( "E" )
             index=$(( end + ${#meta_options[@]} ))
-            echo "$index/E) Next page" >&2
-        fi
+            echo "E) Next page"
+        fi >&2
 
         local selection
         read -rp "$1" selection
@@ -251,7 +282,7 @@ user_selection() {
             start=${starts[-1]}
             end=${ends[-1]}
             unset "starts[-1]" "ends[-1]"
-        elif (( start > 1 )) && [[ "$selection" =~ ^[Qq]$ ]]; then
+        elif (( start >= 2*(term_lines - reserved + 1) )) && [[ "$selection" =~ ^[Qq]$ ]]; then
             start=1
             end=${ends[0]}
             unset starts ends
@@ -259,15 +290,51 @@ user_selection() {
             starts+=( "$start" )
             ends+=( "$end" )
             start=$(( end + 1 ))
-            end=$(awk -v start="$start" -v lines="$term_lines" -v options=${#option_strings[@]} -v rsv="$reserved" \
-                'BEGIN { options < start + lines - rsv ? end = options : end = start + lines - rsv; print end }')
-        elif (( end < ${#option_strings[@]} )) && [[ "$selection" =~ ^[Ww]$ ]]; then
+            if (( start > 1 )); then
+                if (( ${#option_strings[@]} - start + 1 > term_lines )); then
+                    reserved=6
+                else
+                    reserved=4
+                fi
+            else
+                if (( ${#option_strings[@]} + 1 > term_lines )); then
+                    reserved=4
+                else
+                    reserved=2
+                fi
+            fi
+            end=$(awk \
+                -v start="$start" \
+                -v lines="$term_lines" \
+                -v options=${#option_strings[@]} \
+                -v rsv="$reserved" \
+                "BEGIN { $ternary_condition ? $ternary_then : $ternary_else; print end }"
+            )
+        elif (( end + term_lines < ${#option_strings[@]} )) && [[ "$selection" =~ ^[Ww]$ ]]; then
             while (( end < ${#option_strings[@]} )); do
                 starts+=( "$start" )
                 ends+=( "$end" )
                 start=$(( end + 1 ))
-                end=$(awk -v start="$start" -v lines="$term_lines" -v options=${#option_strings[@]} -v rsv="$reserved" \
-                    'BEGIN { options < start + lines - rsv ? end = options : end = start + lines - rsv; print end }')
+                if (( start > 1 )); then
+                    if (( ${#option_strings[@]} - start + 1 > term_lines )); then
+                        reserved=6
+                    else
+                        reserved=4
+                    fi
+                else
+                    if (( ${#option_strings[@]} + 1 > term_lines )); then
+                        reserved=4
+                    else
+                        reserved=2
+                    fi
+                fi
+                end=$(awk \
+                    -v start="$start" \
+                    -v lines="$term_lines" \
+                    -v options=${#option_strings[@]} \
+                    -v rsv="$reserved" \
+                    "BEGIN { $ternary_condition ? $ternary_then : $ternary_else; print end }"
+                )
             done
         else
             invalid_selection=true
