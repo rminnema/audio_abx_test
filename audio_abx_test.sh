@@ -43,7 +43,8 @@ main() {
     if [[ -f "$config_file" ]]; then
         [[ -d "$music_dir" ]] || music_dir=$(awk -F '=' '/^music_dir=/ { print $2 }' "$config_file")
         [[ -d "$clips_dir" ]] || clips_dir=$(awk -F '=' '/^clips_dir=/ { print $2 }' "$config_file")
-        [[ "$default_duration" ]] || default_duration=$(awk -F '=' '/^default_duration=/ { print $2 }' "$config_file")
+        [[ "$default_duration" ]] ||
+            default_duration=$(awk -F '=' '/^default_duration=/ { print $2 }' "$config_file")
     fi
     default_duration=${default_duration:-30}
 
@@ -88,11 +89,10 @@ main() {
         errr "Unexpected condition occurred: source_quality='$source_quality'"
     fi
     find_extensions=( -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" )
-    mapfile -t all_artists < \
-        <(find "$music_dir" -mindepth 3 -maxdepth 3 "${find_extensions[@]}" | sed 's|/[^/]*/[^/]*$||' | sort -u)
-    mapfile -t all_albums < \
-        <(find "$music_dir" -mindepth 3 -maxdepth 3 "${find_extensions[@]}" | sed 's|/[^/]*$||' | sort -u)
-    mapfile -t all_tracks < <(find "$music_dir" -mindepth 3 -maxdepth 3 "${find_extensions[@]}" | sort)
+    findopts=( -mindepth 3 -maxdepth 3 "${find_extensions[@]}" )
+    mapfile -t all_artists < <(find "$music_dir" "${findopts[@]}" | sed 's|/[^/]*/[^/]*$||' | uniq)
+    mapfile -t all_albums < <(find "$music_dir" "${findopts[@]}" | sed 's|/[^/]*$||' | uniq)
+    mapfile -t all_tracks < <(find "$music_dir" "${findopts[@]}")
 
     if (( ${#all_tracks[@]} == 0 )); then
         errr "No tracks were found in '$music_dir'"
@@ -722,7 +722,7 @@ generate_track_details() {
 # Truncates lengthy fields and adds ellipsis to indicate such
 ellipsize() {
     local cut_length=$(( max_field_length - 3 ))
-    sed -E "s/(.{$cut_length})..*$/\1.../" <<< "$*" | sed 's/\s*\.\.\.$/.../'
+    sed -E "s/(.{$cut_length})....*$/\1.../" <<< "$*" | sed 's/\s*\.\.\.$/.../'
 }
 
 # Wrapper around the async portion, allocates the temp filenames
@@ -1031,9 +1031,18 @@ save_clip() {
 
 # Print out details about the clip
 print_clip_info() {
-    echo "Artist: ${artists_map["$track"]}"
-    echo "Album: ${albums_map["$track"]}"
-    echo "Title: ${titles_map["$track"]}"
+    local max_field_length=$(( term_width - $(printf "Artist: " | wc -c) ))
+    local artist_el=$(ellipsize "${artists_map["$track"]}")
+    echo "Artist: $artist_el"
+
+    max_field_length=$(( term_width - $(printf "Album: " | wc -c) ))
+    local album_el=$(ellipsize "${albums_map["$track"]}")
+    echo "Album: $album_el"
+
+    max_field_length=$(( term_width - $(printf "Title: " | wc -c) ))
+    local title_el=$(ellipsize "${titles_map["$track"]}")
+    echo "Title: $title_el"
+
     echo "Avg. Bitrate: ${bitrate_map["$track"]} kbps"
     echo "Format: ${format_map["$track"]}"
     echo "Track duration: $(seconds_to_timespec "${durations_map["$track"]}")"
@@ -1060,7 +1069,8 @@ print_results() {
                 echo "$result"
             done
         } | column -ts '|'
-        echo "$accuracy% accuracy, $correct correct out of $(( correct + incorrect )) tries, $skipped skipped"
+        printf "%s%% accuracy, %s correct out of " "$accuracy" "$correct"
+        printf "%s tries, %s skipped\n" "$(( correct + incorrect ))" "$skipped"
         if [[ -z "$quit" ]]; then
             read -rsp "Press enter to continue:" _
             echo
