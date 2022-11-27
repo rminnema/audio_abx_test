@@ -150,8 +150,8 @@ numbered_options_list_option() {
     fi
 
     if [[ "$char" ]]; then
-        char_options[$count]=$char
         count=$(( count + 1 ))
+        char_options[$count]=$char
         option_strings+=( "$(printf "%s/%s) %s\n" "$count" "$char" "$option")" )
     else
         count=$(( count + 1 ))
@@ -159,39 +159,52 @@ numbered_options_list_option() {
     fi
 }
 
+# Calculate the index of the first option to appear on a given page
+page_index() {
+    local page=$1
+    echo "$(( ${indices[$(( page - 1 ))]} + term_lines - ${#reserved_options[$(( page - 1 ))]} - header_line - 1 ))"
+}
+
 # Prints the numbered options then prompts the user for input and validates against provided options
 user_selection() {
-    local ternary_condition="options < start + lines - rsv"
-    local ternary_then="end = options"
-    local ternary_else="end = start + lines - rsv"
-    local start=1
-    local reserved=2
-    if (( start > 1 )); then
-        reserved=$(( reserved + 1 ))
-        echo "$start > 1" >&2
+    local -a reserved_options indices
+    if [[ "$header" ]]; then
+        header_line=1
+    else
+        header_line=0
     fi
-    if (( start > 2*term_lines - 3 )); then
-        reserved=$(( reserved + 1 ))
-        echo "$start > 2*$term_lines - 3" >&2
-    fi
-    if (( start + term_lines - 1 < ${#option_strings[@]} )); then
-        reserved=$(( reserved + 1 ))
-        echo "$start + $term_lines - 1 < ${#option_strings[@]}" >&2
-    fi
-    if (( start + 2*term_lines - 3 < ${#option_strings[@]} )); then
-        reserved=$(( reserved + 1 ))
-        echo "$start + 2*$term_lines - 3 < ${#option_strings[@]}"
-    fi
-    local end=$(
-        awk \
-        -v start="$start" \
-        -v lines="$term_lines" \
-        -v options=${#option_strings[@]} \
-        -v rsv="$reserved" \
-        "BEGIN { $ternary_condition ? $ternary_then : $ternary_else; print end }"
-    )
-    local -a starts
-    local -a ends
+    local capacity=$(( term_lines - header_line - 1 ))
+    local page=0
+    indices[0]=1
+    while (( indices[-1] + term_lines - ${#reserved_options[-1]} - header_line - 1 < ${#option_strings[@]} )); do
+        if (( page == 0 )); then
+            reserved_options[0]=E
+            reserved_options[1]=V
+            indices[1]=$(page_index 1)
+        elif (( page == 1 )); then
+            reserved_options[0]=EW
+            indices[1]=$(page_index 1)
+            reserved_options[1]=VE
+            indices[2]=$(page_index 2)
+            reserved_options[2]=QV
+        elif (( page == 2 )); then
+            reserved_options[1]=VEW
+            indices[2]=$(page_index 2)
+            reserved_options[2]=QVE
+            indices[3]=$(page_index 3)
+            reserved_options[3]=QV
+        elif (( page > 2 )); then
+            indices[$(( page - 1 ))]=$(page_index "$(( page - 1 ))")
+            reserved_options[$(( page - 1 ))]=QVEW
+            indices[$page]=$(page_index "$page")
+            reserved_options[$page]=QVE
+            indices[$(( page + 1 ))]=$(page_index "$(( page + 1 ))")
+            reserved_options[$(( page + 1 ))]=QV
+        fi
+        page=$(( page + 1 ))
+    done
+    page=0
+
     if [[ "$1" == '--printinfo' ]]; then
         local printinfo=true
         shift
@@ -199,146 +212,99 @@ user_selection() {
         local printinfo=false
     fi
     local invalid_selection=false
+
     while true; do
+        clear -x >&2
+        if "$invalid_selection"; then
+            warn "Invalid selection: '$selection'"
+            read -rsp "Press enter to continue" _
+            clear -x >&2
+        fi
+        invalid_selection=false
         if "$printinfo"; then
-            clear -x
-            if "$invalid_selection"; then
-                warn "Invalid selection: '$selection'"
-                read -rsp "Press enter to continue" _
-                clear -x
-            fi
             print_clip_info
             echo
-        else
-            clear -x
-            if "$invalid_selection"; then
-                warn "Invalid selection: '$selection'"
-                read -rsp "Press enter to continue" _
-                clear -x
-            fi
         fi >&2
-        invalid_selection=false
 
         [[ "$header" ]] && echo "$header" >&2
+        local start=${indices[$page]}
+        if [[ "${indices[$(( page + 1 ))]}" ]]; then
+            local end=$(( ${indices[$(( page + 1 ))]} - 1 ))
+        else
+            local end=$(( ${#option_strings[@]} ))
+        fi
+
         for i in $(seq "$start" "$end"); do
             echo "${option_strings[$(( i - 1 ))]}"
         done >&2
+
         unset meta_options
         local -a meta_options
-        local index
-        if (( start >= 2*(term_lines - reserved + 1) )); then
-            meta_options+=( "Q" )
-            echo "Q) First page"
-        fi >&2
-        if (( start > 1 )); then
-            meta_options+=( "V" )
-            echo "V) Previous page"
-        fi >&2
-        if (( end + term_lines + reserved < ${#option_strings[@]} )); then
-            meta_options+=( "W" )
-            index=$(( end + ${#meta_options[@]} ))
-            echo "W) Last page"
-        fi >&2
-        if (( end + reserved < ${#option_strings[@]} )); then
-            meta_options+=( "E" )
-            index=$(( end + ${#meta_options[@]} ))
-            echo "E) Next page"
-        fi >&2
+
+        page_reserved_options=${reserved_options[$page]}
+        for (( i=0; i<${#page_reserved_options}; i++)); do
+            option=${page_reserved_options:$i:1}
+            meta_options+=( "$option" )
+            case "$option" in
+                Q)
+                    echo "Q) First page" >&2 ;;
+                V)
+                    echo "V) Previous page" >&2 ;;
+                E)
+                    echo "E) Next page" >&2 ;;
+                W)
+                    echo "W) Last page" >&2 ;;
+            esac
+        done
 
         local selection
         read -rp "$1" selection
+
         if [[ -z "$selection" ]]; then
             invalid_selection=true
             continue
         fi
+
         for option_number in $(seq "$start" "$end"); do
-            if [[ "$selection" == "$option_number" ]]; then
-                if [[ "${char_options[$(( option_number - 1 ))]}" ]]; then
-                    echo "${char_options[$(( option_number - 1 ))]}"
+            local char_option=${char_options[$option_number]}
+            if [[ "$selection" =~ ^[0-9]+$ ]] && (( 10#$selection == option_number )); then
+                if [[ "$char_option" ]]; then
+                    echo "$char_option"
                 else
                     echo "$selection"
                 fi
                 return 0
-            elif [[ "${selection^^}" == "${char_options[$(( option_number - 1 ))]}" ]]; then
-                echo "${selection^^}"
+            elif [[ "${selection^^}" == "$char_option" ]]; then
+                echo "$char_option"
                 return 0
             fi
         done
 
         if [[ "$selection" =~ ^[0-9]+$ ]]; then
-            local meta_index=$(( selection - end - 1 ))
-            if (( meta_index >= 0 )); then
-                selection=${meta_options[$meta_index]}
+            local meta_options_index=$(( 10#$selection - end - 1 ))
+            if (( meta_options_index >= 0 )); then
+                selection=${meta_options[$meta_options_index]}
             else
                 invalid_selection=true
                 continue
             fi
-        elif [[ ! "$selection" =~ ^[EeQqVvWw]$ ]]; then
+        elif [[ ! "$selection" =~ ^[${reserved_options[$page],,}${reserved_options[$page]^^}]$ ]]; then
             invalid_selection=true
             continue
         fi
 
-        if (( start > 1 )) && [[ "$selection" =~ ^[Vv]$ ]]; then
-            start=${starts[-1]}
-            end=${ends[-1]}
-            unset "starts[-1]" "ends[-1]"
-        elif (( start >= 2*(term_lines - reserved + 1) )) && [[ "$selection" =~ ^[Qq]$ ]]; then
-            start=1
-            end=${ends[0]}
-            unset starts ends
-        elif (( end < ${#option_strings[@]} )) && [[ "$selection" =~ ^[Ee]$ ]]; then
-            starts+=( "$start" )
-            ends+=( "$end" )
-            start=$(( end + 1 ))
-            if (( start > 1 )); then
-                if (( ${#option_strings[@]} - start + 1 > term_lines )); then
-                    reserved=6
-                else
-                    reserved=4
-                fi
-            else
-                if (( ${#option_strings[@]} + 1 > term_lines )); then
-                    reserved=4
-                else
-                    reserved=2
-                fi
-            fi
-            end=$(awk \
-                -v start="$start" \
-                -v lines="$term_lines" \
-                -v options=${#option_strings[@]} \
-                -v rsv="$reserved" \
-                "BEGIN { $ternary_condition ? $ternary_then : $ternary_else; print end }"
-            )
-        elif (( end + term_lines < ${#option_strings[@]} )) && [[ "$selection" =~ ^[Ww]$ ]]; then
-            while (( end < ${#option_strings[@]} )); do
-                starts+=( "$start" )
-                ends+=( "$end" )
-                start=$(( end + 1 ))
-                if (( start > 1 )); then
-                    if (( ${#option_strings[@]} - start + 1 > term_lines )); then
-                        reserved=6
-                    else
-                        reserved=4
-                    fi
-                else
-                    if (( ${#option_strings[@]} + 1 > term_lines )); then
-                        reserved=4
-                    else
-                        reserved=2
-                    fi
-                fi
-                end=$(awk \
-                    -v start="$start" \
-                    -v lines="$term_lines" \
-                    -v options=${#option_strings[@]} \
-                    -v rsv="$reserved" \
-                    "BEGIN { $ternary_condition ? $ternary_then : $ternary_else; print end }"
-                )
-            done
-        else
-            invalid_selection=true
-        fi
+        case "${selection^^}" in
+            Q)
+                page=0 ;;
+            W)
+                page=$(( ${#reserved_options[@]} - 1 )) ;;
+            E)
+                page=$(( page + 1 )) ;;
+            V)
+                page=$(( page - 1 )) ;;
+            *)
+                invalid_selection=true ;;
+        esac
     done
 }
 
