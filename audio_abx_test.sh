@@ -160,51 +160,52 @@ numbered_options_list_option() {
 }
 
 # Calculate the index of the first option to appear on a given page
+# The output of `page_index 0` isn't the index of the first option of page 0,
+# but the first index of the next page that would go after the current end page if needed
+# Invoking the function this way is just convenient given how Bash handles negative array indices
 page_index() {
-    local page=$1
-    echo "$(( ${indices[$(( page - 1 ))]} + term_lines - ${#reserved_options[$(( page - 1 ))]} - header_line - 1 ))"
+    echo "$(( ${indices[$(( $1 - 1 ))]} + term_lines - ${#reserved_options[$(( $1 - 1 ))]} - header_line - prompt ))"
 }
 
 # Prints the numbered options then prompts the user for input and validates against provided options
 user_selection() {
     local -a reserved_options indices
     if [[ "$header" ]]; then
-        header_line=1
+        local header_line=1
     else
-        header_line=0
+        local header_line=0
     fi
-    local capacity=$(( term_lines - header_line - 1 ))
+    local prompt=1
     local page=0
     indices[0]=1
-    # The output of `page_index 0` isn't the first index of page 0, but of the next page after the current end page
-    # Invoking the function this way is just convenient given how Bash handles negative array indices
     while (( $(page_index 0) < ${#option_strings[@]} )); do
         if (( page == 0 )); then
-            reserved_options[0]=E
-            reserved_options[1]=V
+            reserved_options[0]=E # next
+            reserved_options[1]=V # previous
             indices[1]=$(page_index 1)
         elif (( page == 1 )); then
-            reserved_options[0]=EW
+            reserved_options[0]=EW # next last
             indices[1]=$(page_index 1)
-            reserved_options[1]=VE
+            reserved_options[1]=VE # previous next
             indices[2]=$(page_index 2)
-            reserved_options[2]=QV
+            reserved_options[2]=QV # first previous
         elif (( page == 2 )); then
-            reserved_options[1]=VEW
+            reserved_options[1]=VEW # previous next last
             indices[2]=$(page_index 2)
-            reserved_options[2]=QVE
+            reserved_options[2]=QVE # first previous next
             indices[3]=$(page_index 3)
-            reserved_options[3]=QV
+            reserved_options[3]=QV # first previous
         elif (( page > 2 )); then
             indices[$(( page - 1 ))]=$(page_index "$(( page - 1 ))")
-            reserved_options[$(( page - 1 ))]=QVEW
+            reserved_options[$(( page - 1 ))]=QVEW # first previous next last
             indices[$page]=$(page_index "$page")
-            reserved_options[$page]=QVE
+            reserved_options[$page]=QVE # first previous next
             indices[$(( page + 1 ))]=$(page_index "$(( page + 1 ))")
-            reserved_options[$(( page + 1 ))]=QV
+            reserved_options[$(( page + 1 ))]=QV # first previous
         fi
         page=$(( page + 1 ))
     done
+    local pages=$(( page + 1 ))
     page=0
 
     if [[ "$1" == '--printinfo' ]]; then
@@ -299,7 +300,7 @@ user_selection() {
             Q)
                 page=0 ;;
             W)
-                page=$(( ${#reserved_options[@]} - 1 )) ;;
+                page=$(( pages - 1 )) ;;
             E)
                 page=$(( page + 1 )) ;;
             V)
@@ -403,26 +404,27 @@ select_program() {
 }
 
 generate_timestamps() {
-    start_numbered_options_list "Input timestamps manually or have them randomly generated?"
-    numbered_options_list_option "Random timestamps" "R"
-    numbered_options_list_option "Manual timestamps" "M"
-    if [[ "${FUNCNAME[1]}" == "select_program" ]]; then
-        numbered_options_list_option "Cancel and return to main menu" "C"
-    fi
-    local timestamp_selection
-    timestamp_selection=$(user_selection --printinfo "Selection: ")
-    echo
-    if [[ "$timestamp_selection" =~ ^[Mm]$ ]]; then
-        user_timestamps
-    elif [[ "$timestamp_selection" =~ ^[Rr]$ ]]; then
-        if ! random_timestamps; then
-            warn "Something went wrong with random timestamps"
-            return 1
-        fi
-    elif [[ "$timestamp_selection" =~ ^[Cc]$ ]]; then
-        return 0
+    if [[ "$fully_random" =~ ^[Yy]$ ]]; then
+        random_timestamps
     else
-        errr "Unexpected condition occurred: timestamp_selection='$timestamp_selection'"
+        start_numbered_options_list "Input timestamps manually or have them randomly generated?"
+        numbered_options_list_option "Random timestamps" "R"
+        numbered_options_list_option "Manual timestamps" "M"
+        local timestamp_selection
+        timestamp_selection=$(user_selection --printinfo "Selection: ")
+        echo
+        if [[ "$timestamp_selection" =~ ^[Mm]$ ]]; then
+            user_timestamps
+        elif [[ "$timestamp_selection" =~ ^[Rr]$ ]]; then
+            if ! random_timestamps; then
+                warn "Something went wrong with random timestamps"
+                return 1
+            fi
+        elif [[ "$timestamp_selection" =~ ^[Cc]$ ]]; then
+            return 0
+        else
+            errr "Unexpected condition occurred: timestamp_selection='$timestamp_selection'"
+        fi
     fi
     sanitize_timestamps
 }
