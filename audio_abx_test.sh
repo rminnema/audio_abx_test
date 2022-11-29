@@ -43,8 +43,7 @@ main() {
     if [[ -f "$config_file" ]]; then
         [[ -d "$music_dir" ]] || music_dir=$(awk -F '=' '/^music_dir=/ { print $2 }' "$config_file")
         [[ -d "$clips_dir" ]] || clips_dir=$(awk -F '=' '/^clips_dir=/ { print $2 }' "$config_file")
-        [[ "$default_duration" ]] ||
-            default_duration=$(awk -F '=' '/^default_duration=/ { print $2 }' "$config_file")
+        [[ "$default_duration" ]] || default_duration=$(awk -F '=' '/^default_duration=/ { print $2 }' "$config_file")
     fi
     default_duration=${default_duration:-30}
 
@@ -54,7 +53,7 @@ main() {
 
     cmnds_notfound=()
     for cmd in ffmpeg vlc mediainfo ffprobe; do
-        cmd_set="$cmd=\$(command -v '$cmd.exe') || $cmd=\$(command -v '$cmd')"
+        cmd_set="$cmd=\$(command -v '$cmd') || $cmd=\$(command -v '$cmd.exe')"
         if ! eval "$cmd_set"; then
             cmnds_notfound+=( "$cmd" )
         fi
