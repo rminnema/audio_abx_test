@@ -766,6 +766,16 @@ create_clip() {
     original_clip=$(mktemp --suffix=.wav)
     lossy_clip=$(mktemp --suffix=.wav)
     tmp_mp3=$(mktemp --suffix=.mp3)
+    if [[ "${ffmpeg:?}" == *ffmpeg ]]; then
+        local ffmpeg_track=$track
+        local ffmpeg_original_clip=$original_clip
+        local ffmpeg_lossy_clip=$lossy_clip
+    else
+        local ffmpeg_track=$(wslpath -w "$track")
+        local ffmpeg_original_clip=$(wslpath -w "$original_clip")
+        local ffmpeg_lossy_clip=$(wslpath -w "$lossy_clip")
+    fi
+
     create_clip_async &
     create_clip_pid=$!
 }
@@ -787,16 +797,6 @@ cleanup_async() {
 # Create an original-quality clip and a lossy clip from a given track at the given timestamps
 # Obfuscate both original quality and lossy clips as .wav so it cannot easily be determined which is the X file
 create_clip_async() {
-    if [[ "${ffmpeg:?}" == *ffmpeg.exe ]]; then
-        local ffmpeg_track=$(wslpath -w "$track")
-        local ffmpeg_original_clip=$(wslpath -w "$original_clip")
-        local ffmpeg_lossy_clip=$(wslpath -w "$lossy_clip")
-    else
-        local ffmpeg_track=$track
-        local ffmpeg_original_clip=$original_clip
-        local ffmpeg_lossy_clip=$lossy_clip
-    fi
-
     "${ffmpeg:?}" -nostdin -loglevel error -y -i "$ffmpeg_track" \
         -ss "$startsec" -t "$clip_duration" "$ffmpeg_original_clip" \
         -ss "$startsec" -t "$clip_duration" -b:a "$bitrate" "$tmp_mp3"
@@ -1105,8 +1105,11 @@ print_results() {
                 echo "$result"
             done
         } | column -ts '|'
-        printf "%s%% accuracy, %s correct out of " "$accuracy" "$correct"
-        printf "%s tries, %s skipped\n" "$(( correct + incorrect ))" "$skipped"
+        local tries=$(( correct + incorrect ))
+        printf "%s%% accuracy, " "$accuracy"
+        printf "%s correct out of " "$correct"
+        printf "%s tries, " "$tries"
+        printf "%s skipped\n" "$skipped"
         if [[ -z "$quit" ]]; then
             read -rsp "Press enter to continue:" _
             echo
