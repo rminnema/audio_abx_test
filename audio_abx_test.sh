@@ -7,9 +7,9 @@ readonly BLUE=$'\E[34m'
 readonly NOCOLOR=$'\E[0m'
 
 # Functions for printing different message types to the terminal
-errr() { printf "%sERROR:%s %s\n\n" "$RED" "$NOCOLOR" "$*" >&2; exit 1; }
-warn() { printf "%sWARNING:%s %s\n\n" "$YELLOW" "$NOCOLOR" "$*" >&2; }
-info() { printf "%sInfo:%s %s\n\n" "$BLUE" "$NOCOLOR" "$*" >&2; }
+errr() { printf "%sERROR:%s %s\n" "$RED" "$NOCOLOR" "$*" >&2; exit 1; }
+warn() { printf "%sWARNING:%s %s\n" "$YELLOW" "$NOCOLOR" "$*" >&2; }
+info() { printf "%sInfo:%s %s\n" "$BLUE" "$NOCOLOR" "$*" >&2; }
 
 # Main program logic
 main() {
@@ -89,20 +89,15 @@ main() {
     fi
     find_extensions=( -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" )
     findopts=( -mindepth 3 -maxdepth 3 "${find_extensions[@]}" )
-    mapfile -t all_artists < <(find "$music_dir" "${findopts[@]}" | sed 's|/[^/]*/[^/]*$||' | uniq)
-    mapfile -t all_albums < <(find "$music_dir" "${findopts[@]}" | sed 's|/[^/]*$||' | uniq)
     mapfile -t all_tracks < <(find "$music_dir" "${findopts[@]}")
+    mapfile -t all_albums < <(IFS=$'\n'; sed 's|/[^/]*$||' <<< "${all_tracks[*]}" | uniq)
+    mapfile -t all_artists < <(IFS=$'\n'; sed 's|/[^/]*$||' <<< "${all_albums[*]}" | uniq)
 
     if (( ${#all_tracks[@]} == 0 )); then
         errr "No tracks were found in '$music_dir'"
     fi
 
     track_index=0
-    original_clip=''
-    lossy_clip=''
-    tmp_mp3=''
-    vlc_pid=''
-    create_clip_pid=''
     max_idx=$(( ${#all_tracks[@]} - 1 ))
     mapfile -t random_order < <(shuf -i 0-"$max_idx" --random-source=/dev/urandom)
     next_track_is_random=false
@@ -151,10 +146,10 @@ numbered_options_list_option() {
     if [[ "$char" ]]; then
         count=$(( count + 1 ))
         char_options[$count]=$char
-        option_strings+=( "$(printf "%s/%s) %s\n" "$count" "$char" "$option")" )
+        option_strings+=( "$count/$char) $option" )
     else
         count=$(( count + 1 ))
-        option_strings+=( "$(printf "%s) %s\n" "$count" "$option")" )
+        option_strings+=( "$count) $option" )
     fi
 }
 
@@ -674,11 +669,11 @@ track_search() {
         track_name=$(basename "$track" | sed 's/^[0-9]* - //')
         album_name=$(awk -F '/' '{ print $(NF-1) }' <<< "$track")
         artist_name=$(awk -F '/' '{ print $(NF-2) }' <<< "$track")
-        local max_field_length=$(( (term_width - 10)/3 ))
+        local max_field_length=$(( (term_width - 11)/3 ))
         local list_option="$(ellipsize "$artist_name") - "
-        max_field_length=$(( (term_width - ${#list_option} - 7)/2 ))
+        max_field_length=$(( (term_width - ${#list_option} - 8)/2 ))
         list_option+="$(ellipsize "$album_name") - "
-        max_field_length=$(( term_width - ${#list_option} - 4 ))
+        max_field_length=$(( term_width - ${#list_option} - 5 ))
         list_option+="$(ellipsize "#$track_number - $track_name")"
         numbered_options_list_option "$list_option"
         matched_tracks+=( "$track" )
@@ -758,7 +753,7 @@ generate_track_details() {
 # Truncates lengthy fields and adds ellipsis to indicate such
 ellipsize() {
     local cut_length=$(( max_field_length - 3 ))
-    sed -E "s/(.{$cut_length})....*$/\1.../" <<< "$*" | sed 's/\s*\.\.\.$/.../'
+    sed -Ee "s/(.{$cut_length})....*$/\1.../" -e 's/\s*\.\.\.$/.../' <<< "$*"
 }
 
 # Wrapper around the async portion, allocates the temp filenames
