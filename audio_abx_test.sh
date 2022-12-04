@@ -143,14 +143,18 @@ numbered_options_list_option() {
         errr "Acceptable value for symbolic list option: A-Z excluding EQVW."
     fi
 
+    count=$(( count + 1 ))
     if [[ "$char" ]]; then
-        count=$(( count + 1 ))
         char_options[$count]=$char
-        option_strings+=( "$count/$char) $option" )
+        local option_string="$count/$char) $option"
     else
-        count=$(( count + 1 ))
-        option_strings+=( "$count) $option" )
+        local option_string="$count) $option"
     fi
+    if (( ${#option_string} >= term_width )); then
+        max_field_length=term_width
+        option_string=$(ellipsize "$option_string")
+    fi
+    option_strings+=( "$option_string" )
 }
 
 # Calculate the index of the first option to appear on a given page
@@ -573,10 +577,8 @@ artist_search() {
 
     start_numbered_options_list
     for index in "${matched_artist_indices[@]}"; do
-        artist=${all_artists[$index]}
-        local artist_name=$(basename "$artist")
-        numbered_options_list_option "$artist_name"
-        matched_artists+=( "$artist" )
+        numbered_options_list_option "$(basename "${all_artists["$index"]}")"
+        matched_artists+=( "${all_artists["$index"]}" )
     done
     (( ${#matched_artists[@]} > 1 )) && numbered_options_list_option "Search albums of all above artists" "A"
     numbered_options_list_option "Random track from the above artists" "N"
@@ -617,11 +619,8 @@ album_search() {
 
     unset matched_albums
     for index in "${matched_album_indices[@]}"; do
-        album=${albums[$index]}
-        local album_name=$(basename "$album")
-        local artist_name=$(awk -F '/' '{ print $(NF-1) }' <<< "$album")
-        numbered_options_list_option "$artist_name - $album_name"
-        matched_albums+=( "$album" )
+        numbered_options_list_option "$(sed -E 's|^.*/([^/]*)/([^/]*)$|\1 - \2|' <<< "${albums["$index"]}")"
+        matched_albums+=( "${albums["$index"]}" )
     done
     (( ${#matched_albums[@]} > 1 )) && numbered_options_list_option "Search tracks of above albums" "A"
     numbered_options_list_option "Random track from the above albums" "N"
@@ -665,17 +664,7 @@ track_search() {
 
     for index in "${matched_track_indices[@]}"; do
         track=${tracks[$index]}
-        track_number=$(basename "$track" | grep -o "^[0-9]*")
-        track_name=$(basename "$track" | sed 's/^[0-9]* - //')
-        album_name=$(awk -F '/' '{ print $(NF-1) }' <<< "$track")
-        artist_name=$(awk -F '/' '{ print $(NF-2) }' <<< "$track")
-        local max_field_length=$(( (term_width - 11)/3 ))
-        local list_option="$(ellipsize "$artist_name") - "
-        max_field_length=$(( (term_width - ${#list_option} - 8)/2 ))
-        list_option+="$(ellipsize "$album_name") - "
-        max_field_length=$(( term_width - ${#list_option} - 5 ))
-        list_option+="$(ellipsize "#$track_number - $track_name")"
-        numbered_options_list_option "$list_option"
+        numbered_options_list_option "$(sed -E 's|^.*/([^/]*)/([^/]*)/([^/]*)$|\1 - \2 - #\3|' <<< "$track")"
         matched_tracks+=( "$track" )
     done
     numbered_options_list_option "Random track from above" "N"
