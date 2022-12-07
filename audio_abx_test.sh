@@ -151,7 +151,7 @@ numbered_options_list_option() {
         local option_string="$count) $option"
     fi
     if (( ${#option_string} >= term_width )); then
-        max_field_length=term_width
+        local max_field_length=term_width
         option_string=$(ellipsize "$option_string")
     fi
     option_strings+=( "$option_string" )
@@ -401,6 +401,7 @@ select_program() {
     esac
 }
 
+# Generate the timestamps to be used in the clip
 generate_timestamps() {
     if [[ "$fully_random" =~ ^[Yy]$ ]]; then
         random_timestamps
