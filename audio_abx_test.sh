@@ -111,7 +111,8 @@ main() {
             search_next_track
         fi
         generate_track_details
-        generate_timestamps
+        random_timestamps
+        sanitize_timestamps
         create_clip
 
         x_clip_quality=$(( RANDOM%2 ))
