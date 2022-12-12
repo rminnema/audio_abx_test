@@ -751,7 +751,6 @@ ellipsize() {
 create_clip() {
     original_clip=$(mktemp --suffix=.wav)
     lossy_clip=$(mktemp --suffix=.wav)
-    tmp_mp3=$(mktemp --suffix=.mp3)
     if [[ "${ffmpeg:?}" == *ffmpeg ]]; then
         local ffmpeg_track=$track
         local ffmpeg_original_clip=$original_clip
@@ -777,7 +776,7 @@ cleanup_async() {
     while kill -0 "$create_clip_pid" 2>/dev/null; do
         sleep 0.1
     done
-    rm -f "$original_clip" "$lossy_clip" "$tmp_mp3" "$x_clip"
+    rm -f "$original_clip" "$lossy_clip" "$x_clip"
 }
 
 # Create an original-quality clip and a lossy clip from a given track at the given timestamps
@@ -785,9 +784,7 @@ cleanup_async() {
 create_clip_async() {
     "${ffmpeg:?}" -nostdin -loglevel error -y -i "$ffmpeg_track" \
         -ss "$startsec" -t "$clip_duration" "$ffmpeg_original_clip" \
-        -ss "$startsec" -t "$clip_duration" -b:a "$bitrate" "$tmp_mp3"
-
-    "${ffmpeg:?}" -nostdin -loglevel error -y -i "$tmp_mp3" "$ffmpeg_lossy_clip"
+        -codec:a libmp3lame -ss "$startsec" -t "$clip_duration" -b:a "$bitrate" "$ffmpeg_lossy_clip"
 }
 
 # Generate random timestamps to use for clipping
