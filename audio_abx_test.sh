@@ -610,7 +610,7 @@ album_search() {
     local findopts=( -mindepth 2 -maxdepth 2 "${find_extensions[@]}" )
     read -rp "Album search string: " search_string
     local -a albums
-    if [[ "$artist" ]]; then
+    if (( ${#matched_artists[@]} > 0 )); then
         mapfile -t albums < <(find "${matched_artists[@]}" "${findopts[@]}" | sed 's|/[^/]*$||' | sort -u)
     else
         albums=( "${all_albums[@]}" )
