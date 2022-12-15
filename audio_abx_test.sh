@@ -650,7 +650,7 @@ album_search() {
 track_search() {
     clear -x >&2
     local -a tracks matched_tracks matched_track_indices
-    local search_string artist_name album_name track_name track_number track_selection
+    local search_string track_selection
     local findopts=( -mindepth 1 -maxdepth 1 "${find_extensions[@]}" )
     start_numbered_options_list
     read -rp "Track title search string: " search_string
