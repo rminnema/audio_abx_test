@@ -551,11 +551,7 @@ search_next_track() {
 utf8_array_search() {
     IFS=$'\n'
     iconv -f utf8 -t ascii//TRANSLIT <<< "$*" |
-        awk -F '/' '{ print $NF }' |
-        grep -Ein "${search_string:-.*}" |
-        awk -F ':' '{ print $1 }' |
-        sed 's/$/ - 1/' |
-        bc
+        awk -v search="${search_string:-.*}" -F '/' 'BEGIN { IGNORECASE = 1 } $NF~search { printf "%s\n", NR - 1 }'
 }
 
 # Search for an artist with a given string
