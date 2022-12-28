@@ -89,9 +89,9 @@ main() {
     fi
     find_extensions=( -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" )
     findopts=( -mindepth 3 -maxdepth 3 "${find_extensions[@]}" )
-    mapfile -t all_tracks < <(find "$music_dir" "${findopts[@]}")
-    mapfile -t all_albums < <(IFS=$'\n'; sed 's|/[^/]*$||' <<< "${all_tracks[*]}" | uniq)
-    mapfile -t all_artists < <(IFS=$'\n'; sed 's|/[^/]*$||' <<< "${all_albums[*]}" | uniq)
+    mapfile -t all_tracks < <(find "$music_dir" "${findopts[@]}" | sort)
+    mapfile -t all_albums < <(IFS=$'\n'; sed 's|/[^/]*$||' <<< "${all_tracks[*]}" | sort -u)
+    mapfile -t all_artists < <(IFS=$'\n'; sed 's|/[^/]*$||' <<< "${all_albums[*]}" | sort -u)
 
     if (( ${#all_tracks[@]} == 0 )); then
         errr "No tracks were found in '$music_dir'"
@@ -651,9 +651,9 @@ track_search() {
     start_numbered_options_list
     read -rp "Track title search string: " search_string
     if (( ${#matched_albums[@]} > 0 )); then
-        mapfile -t tracks < <(find "${matched_albums[@]}" "${findopts[@]}")
+        mapfile -t tracks < <(find "${matched_albums[@]}" "${findopts[@]}" | sort -u)
     elif (( ${#matched_artists[@]} > 0 )); then
-        mapfile -t tracks < <(find "${matched_artists[@]}" "${findopts[@]}")
+        mapfile -t tracks < <(find "${matched_artists[@]}" "${findopts[@]}" | sort -u)
     else
         tracks=( "${all_tracks[@]}" )
     fi
