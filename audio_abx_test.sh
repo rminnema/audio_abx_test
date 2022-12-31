@@ -146,7 +146,7 @@ numbered_options_list_option() {
 
     count=$(( count + 1 ))
     if [[ "$char" ]]; then
-        char_options[$count]=$char
+        char_options[count]=$char
         local option_string="$count/$char) $option"
     else
         local option_string="$count) $option"
@@ -163,7 +163,7 @@ numbered_options_list_option() {
 # but the first index of the next page that would go after the current end page if needed
 # Invoking the function this way is just convenient given how Bash handles negative array indices
 page_index() {
-    echo "$(( ${indices[$(( $1 - 1 ))]} + term_lines - ${#reserved_options[$(( $1 - 1 ))]} - header_line - prompt ))"
+    echo "$(( ${indices[$1 - 1]} + term_lines - ${#reserved_options[$1 - 1]} - header_line - prompt ))"
 }
 
 # Prints the numbered options then prompts the user for input and validates against provided options
@@ -195,12 +195,12 @@ user_selection() {
             indices[3]=$(page_index 3)
             reserved_options[3]=QV # first previous
         elif (( page > 2 )); then
-            indices[$(( page - 1 ))]=$(page_index "$(( page - 1 ))")
-            reserved_options[$(( page - 1 ))]=QVEW # first previous next last
-            indices[$page]=$(page_index "$page")
-            reserved_options[$page]=QVE # first previous next
-            indices[$(( page + 1 ))]=$(page_index "$(( page + 1 ))")
-            reserved_options[$(( page + 1 ))]=QV # first previous
+            indices[page - 1]=$(page_index "$(( page - 1 ))")
+            reserved_options[page - 1]=QVEW # first previous next last
+            indices[page]=$(page_index "$page")
+            reserved_options[page]=QVE # first previous next
+            indices[page + 1]=$(page_index "$(( page + 1 ))")
+            reserved_options[page + 1]=QV # first previous
         fi
         page=$(( page + 1 ))
     done
@@ -229,21 +229,21 @@ user_selection() {
         fi >&2
 
         [[ "$header" ]] && echo "$header" >&2
-        local start=${indices[$page]}
-        if [[ "${indices[$(( page + 1 ))]}" ]]; then
-            local end=$(( ${indices[$(( page + 1 ))]} - 1 ))
+        local start=${indices[page]}
+        if [[ "${indices[page + 1]}" ]]; then
+            local end=$(( ${indices[page + 1]} - 1 ))
         else
             local end=$(( ${#option_strings[@]} ))
         fi
 
         for i in $(seq "$start" "$end"); do
-            echo "${option_strings[$(( i - 1 ))]}"
+            echo "${option_strings[i - 1]}"
         done >&2
 
         unset meta_options
         local -a meta_options
 
-        page_reserved_options=${reserved_options[$page]}
+        page_reserved_options=${reserved_options[page]}
         for (( i=0; i<${#page_reserved_options}; i++)); do
             option=${page_reserved_options:$i:1}
             meta_options+=( "$option" )
@@ -268,7 +268,7 @@ user_selection() {
         fi
 
         for option_number in $(seq "$start" "$end"); do
-            local char_option=${char_options[$option_number]}
+            local char_option=${char_options[option_number]}
             if [[ "$selection" =~ ^[0-9]+$ ]] && (( 10#$selection == option_number )); then
                 if [[ "$char_option" ]]; then
                     echo "$char_option"
@@ -285,12 +285,12 @@ user_selection() {
         if [[ "$selection" =~ ^[0-9]+$ ]]; then
             local meta_options_index=$(( 10#$selection - end - 1 ))
             if (( meta_options_index >= 0 )); then
-                selection=${meta_options[$meta_options_index]}
+                selection=${meta_options[meta_options_index]}
             else
                 invalid_selection=true
                 continue
             fi
-        elif [[ ! "$selection" =~ ^[${reserved_options[$page],,}${reserved_options[$page]^^}]$ ]]; then
+        elif [[ ! "$selection" =~ ^[${reserved_options[page],,}${reserved_options[page]^^}]$ ]]; then
             invalid_selection=true
             continue
         fi
@@ -575,8 +575,8 @@ artist_search() {
 
     start_numbered_options_list
     for index in "${matched_artist_indices[@]}"; do
-        numbered_options_list_option "$(basename "${all_artists["$index"]}")"
-        matched_artists+=( "${all_artists["$index"]}" )
+        numbered_options_list_option "$(basename "${all_artists[index]}")"
+        matched_artists+=( "${all_artists[index]}" )
     done
     (( ${#matched_artists[@]} > 1 )) && numbered_options_list_option "Search albums of all above artists" "A"
     numbered_options_list_option "Random track from the above artists" "N"
@@ -592,7 +592,7 @@ artist_search() {
     elif (( ${#matched_artists[@]} > 1 && artist_selection == count - 2 )) || [[ "$artist_selection" =~ ^[Aa]$ ]]; then
         action=album
     elif (( artist_selection <= count - 2 )); then
-        matched_artists=( "${matched_artists[$(( artist_selection - 1 ))]}" ) # Search albums of a single artist
+        matched_artists=( "${matched_artists[artist_selection - 1]}" ) # Search albums of a single artist
         action=album
     fi
 }
@@ -617,8 +617,8 @@ album_search() {
 
     unset matched_albums
     for index in "${matched_album_indices[@]}"; do
-        numbered_options_list_option "$(sed -E 's|^.*/([^/]*)/([^/]*)$|\1 - \2|' <<< "${albums["$index"]}")"
-        matched_albums+=( "${albums["$index"]}" )
+        numbered_options_list_option "$(sed -E 's|^.*/([^/]*)/([^/]*)$|\1 - \2|' <<< "${albums[index]}")"
+        matched_albums+=( "${albums[index]}" )
     done
     (( ${#matched_albums[@]} > 1 )) && numbered_options_list_option "Search tracks of above albums" "A"
     numbered_options_list_option "Random track from the above albums" "N"
@@ -637,7 +637,7 @@ album_search() {
     elif (( ${#matched_albums[@]} > 1 && album_selection == count - 3 )) || [[ "$album_selection" =~ ^[Aa]$ ]]; then
         action=track
     elif (( album_selection <= count - 3 )); then
-        matched_albums=( "${matched_albums[$(( album_selection - 1 ))]}" ) # Search one album
+        matched_albums=( "${matched_albums[album_selection - 1]}" ) # Search one album
         action=track
     fi
 }
@@ -661,7 +661,7 @@ track_search() {
     mapfile -t matched_track_indices < <(utf8_array_search "${tracks[@]}")
 
     for index in "${matched_track_indices[@]}"; do
-        track=${tracks[$index]}
+        track=${tracks[index]}
         numbered_options_list_option "$(sed -E 's|^.*/([^/]*)/([^/]*)/([^/]*)$|\1 - \2 - #\3|' <<< "$track")"
         matched_tracks+=( "$track" )
     done
@@ -681,7 +681,7 @@ track_search() {
         track=$(IFS=$'\n'; sort -R <<< "${matched_tracks[*]}" | head -n 1)
         action=selected
     else
-        track="${matched_tracks[$(( track_selection - 1 ))]}"
+        track="${matched_tracks[track_selection - 1]}"
         generate_track_details
         action=selected
     fi
@@ -690,8 +690,8 @@ track_search() {
 # Iterate through the pre-generated array of random indices
 # and use each random index to select a track
 random_next_track() {
-    random_index=${random_order[$track_index]}
-    track=${all_tracks[$random_index]}
+    random_index=${random_order[track_index]}
+    track=${all_tracks[random_index]}
     if (( ++track_index >= ${#all_tracks[@]} )); then
         track_index=0
     fi
