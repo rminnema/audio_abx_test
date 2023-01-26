@@ -160,7 +160,6 @@ main() {
 start_numbered_options_list() {
     # options_list_header is an optional string displayed before the numbered options
     options_list_header="$*"
-    options_count=0
     char_options=()
     option_strings=()
 }
@@ -177,12 +176,11 @@ numbered_options_list_option() {
         errr "Acceptable value for symbolic list option: A-Z excluding EQVW."
     fi
 
-    options_count=$(( options_count + 1 ))
     if [[ "$char" ]]; then
-        char_options[options_count]=$char
-        local option_string="$options_count/$char) $option"
+        char_options[${#option_strings[@]} + 1]=$char
+        local option_string="$(( ${#option_strings[@]} + 1 ))/$char) $option"
     else
-        local option_string="$options_count) $option"
+        local option_string="$(( ${#option_strings[@]} + 1 ))) $option"
     fi
 
     # Ellipsize any option strings that do not fit in the full terminal window
@@ -583,7 +581,7 @@ select_mp3_bitrate() {
             info "Bitrate selection is $bitrate"
             ;;
         *)
-            errr "Input must be between 1 and $options_count" ;;
+            errr "Input must be between 1 and ${#option_strings[@]}" ;;
     esac
     if [[ -z "$last_bitrate" || "$bitrate" != "$last_bitrate" ]]; then
         reset_score
@@ -662,16 +660,16 @@ artist_search() {
 
     local artist_selection
     artist_selection=$(user_selection "Select an artist to search their albums: ")
-    if (( artist_selection == options_count )) || [[ "$artist_selection" =~ ^[Rr]$ ]]; then
+    if (( artist_selection == ${#option_strings[@]} )) || [[ "$artist_selection" =~ ^[Rr]$ ]]; then
         action=artist
-    elif (( artist_selection == options_count - 1 )) || [[ "$artist_selection" =~ ^[Nn]$ ]]; then
+    elif (( artist_selection == ${#option_strings[@]} - 1 )) || [[ "$artist_selection" =~ ^[Nn]$ ]]; then
         track=$(find "${matched_artists[@]}" -mindepth 2 -maxdepth 2 "${find_extensions[@]}" | sort -R | head -n 1)
         action=selected
-    elif (( ${#matched_artists[@]} > 1 && artist_selection == options_count - 2 )) ||
+    elif (( ${#matched_artists[@]} > 1 && artist_selection == ${#option_strings[@]} - 2 )) ||
         [[ "$artist_selection" =~ ^[Aa]$ ]]
     then
         action=album
-    elif (( artist_selection <= options_count - 2 )); then
+    elif (( artist_selection <= ${#option_strings[@]} - 2 )); then
         matched_artists=( "${matched_artists[artist_selection - 1]}" ) # Search albums of a single artist
         action=album
     fi
@@ -706,18 +704,18 @@ album_search() {
 
     local album_selection
     album_selection=$(user_selection "Select an album: ")
-    if (( album_selection == options_count )) || [[ "$album_selection" =~ ^[Rr]$ ]]; then
+    if (( album_selection == ${#option_strings[@]} )) || [[ "$album_selection" =~ ^[Rr]$ ]]; then
         action=artist
-    elif (( album_selection == options_count - 1 )) || [[ "$album_selection" =~ ^[Ll]$ ]]; then
+    elif (( album_selection == ${#option_strings[@]} - 1 )) || [[ "$album_selection" =~ ^[Ll]$ ]]; then
         action=album
-    elif (( album_selection == options_count - 2 )) || [[ "$album_selection" =~ ^[Nn]$ ]]; then
+    elif (( album_selection == ${#option_strings[@]} - 2 )) || [[ "$album_selection" =~ ^[Nn]$ ]]; then
         track=$(find "${matched_albums[@]}" -mindepth 1 -maxdepth 1 "${find_extensions[@]}" | sort -R | head -n 1)
         action=selected
-    elif (( ${#matched_albums[@]} > 1 && album_selection == options_count - 3 )) ||
+    elif (( ${#matched_albums[@]} > 1 && album_selection == ${#option_strings[@]} - 3 )) ||
         [[ "$album_selection" =~ ^[Aa]$ ]]
     then
         action=track
-    elif (( album_selection <= options_count - 3 )); then
+    elif (( album_selection <= ${#option_strings[@]} - 3 )); then
         matched_albums=( "${matched_albums[album_selection - 1]}" ) # Search one album
         action=track
     fi
@@ -752,13 +750,13 @@ track_search() {
     numbered_options_list_option "Search artist again" "R"
 
     track_selection=$(user_selection "Select a track: ")
-    if (( track_selection == options_count )) || [[ "$track_selection" =~ ^[Rr]$ ]]; then
+    if (( track_selection == ${#option_strings[@]} )) || [[ "$track_selection" =~ ^[Rr]$ ]]; then
         action=artist
-    elif (( track_selection == options_count - 1 )) || [[ "$track_selection" =~ ^[Ll]$ ]]; then
+    elif (( track_selection == ${#option_strings[@]} - 1 )) || [[ "$track_selection" =~ ^[Ll]$ ]]; then
         action=album
-    elif (( track_selection == options_count - 2 )) || [[ "$track_selection" =~ ^[Tt]$ ]]; then
+    elif (( track_selection == ${#option_strings[@]} - 2 )) || [[ "$track_selection" =~ ^[Tt]$ ]]; then
         action=track
-    elif (( track_selection == options_count - 3 )) || [[ "$track_selection" =~ ^[Nn]$ ]]; then
+    elif (( track_selection == ${#option_strings[@]} - 3 )) || [[ "$track_selection" =~ ^[Nn]$ ]]; then
         track=$(IFS=$'\n'; sort -R <<< "${matched_tracks[*]}" | head -n 1)
         action=selected
     else
