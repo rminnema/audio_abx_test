@@ -13,9 +13,12 @@ info() { printf "%sInfo:%s %s\n" "$BLUE" "$NOCOLOR" "$*" >&2; }
 
 # Main program logic
 main() {
-    term_width=$(tput cols)
-    term_lines=$(tput lines)
+    # Grab terminal lines and columns
+    terminal_width=$(tput cols)
+    terminal_lines=$(tput lines)
     config_file="$HOME/audio_abx_test.cfg"
+
+    # Process command line parameters
     while (( $# > 0 )); do
         param=$1
         shift
@@ -40,6 +43,8 @@ main() {
                 errr "Unrecognized parameter '$param'" ;;
         esac
     done
+
+    # Process config file
     if [[ -f "$config_file" ]]; then
         [[ -d "$music_dir" ]] || music_dir=$(awk -F '=' '/^music_dir=/ { print $2 }' "$config_file")
         [[ -d "$clips_dir" ]] || clips_dir=$(awk -F '=' '/^clips_dir=/ { print $2 }' "$config_file")
@@ -51,6 +56,7 @@ main() {
         errr "'$music_dir' directory does not exist."
     fi
 
+    # Check that dependencies exist, prefer Linux executables but allow Windows .exe files
     cmnds_notfound=()
     for cmd in ffmpeg vlc mediainfo ffprobe; do
         cmd_set="$cmd=\$(command -v '$cmd') || $cmd=\$(command -v '$cmd.exe')"
@@ -59,67 +65,90 @@ main() {
         fi
     done
     if (( ${#cmnds_notfound[@]} > 0 )); then
-        errr "At least one command was not found: ${cmnds_notfound[*]}"
+        errr "At least one dependency was not found: ${cmnds_notfound[*]}"
     fi
 
     select_mp3_bitrate
-    trap show_results_and_cleanup EXIT
 
     start_numbered_options_list "Fully random song and timestamp selection"
     numbered_options_list_option "Yes" "Y"
     numbered_options_list_option "No" "N"
     fully_random=$(user_selection "Selection: ")
-    echo
+    echo >&2
 
     start_numbered_options_list "Source file quality selection"
     numbered_options_list_option "All files" "A"
     numbered_options_list_option "Lossless only" "S"
-    numbered_options_list_option "Lossy" "Y"
+    numbered_options_list_option "Lossy only" "Y"
     source_quality=$(user_selection "Selection: ")
-    echo
+    echo >&2
 
     if [[ "$source_quality" =~ ^[Aa]$ ]]; then
+        # Selection: "All"
         audio_file_extensions='flac|alac|wav|aiff|mp3|m4a|aac|ogg|opus|wma'
     elif [[ "$source_quality" =~ ^[Ss]$ ]]; then
+        # Selection: "Lossless only"
         audio_file_extensions='flac|alac|wav|aiff'
     elif [[ "$source_quality" =~ ^[Yy]$ ]]; then
+        # Selection: "Lossy only"
         audio_file_extensions='mp3|m4a|aac|ogg|opus|wma'
     else
         errr "Unexpected condition occurred: source_quality='$source_quality'"
     fi
+    # Map all tracks, albums, and artists of the selected quality to arrays
     find_extensions=( -type f -regextype egrep -iregex ".*\.($audio_file_extensions)" )
     findopts=( -mindepth 3 -maxdepth 3 "${find_extensions[@]}" )
     mapfile -t all_tracks < <(find "$music_dir" "${findopts[@]}" | sort)
-    mapfile -t all_albums < <(IFS=$'\n'; sed 's|/[^/]*$||' <<< "${all_tracks[*]}" | sort -u)
-    mapfile -t all_artists < <(IFS=$'\n'; sed 's|/[^/]*$||' <<< "${all_albums[*]}" | sort -u)
+    mapfile -t all_albums < <(printf '%s\n' "${all_tracks[@]}" | sed 's|/[^/]*$||' | uniq)
+    mapfile -t all_artists < <(printf '%s\n' "${all_albums[@]}" | sed 's|/[^/]*$||' | uniq)
 
     if (( ${#all_tracks[@]} == 0 )); then
         errr "No tracks were found in '$music_dir'"
     fi
 
-    track_index=0
-    max_idx=$(( ${#all_tracks[@]} - 1 ))
-    mapfile -t random_order < <(shuf -i 0-"$max_idx" --random-source=/dev/urandom)
+    current_track_index=0
+    max_track_index=$(( ${#all_tracks[@]} - 1 ))
+
+    # Generate a randomly-ordered array of all integers from 0 to max_track_index with each value used exactly once
+    # Linearly iterating through this array and using each value as an index to the all_tracks() array gives us
+    # random track selection without repeats
+    mapfile -t random_track_indices < <(shuf -i 0-"$max_track_index" --random-source=/dev/urandom)
     next_track_is_random=false
 
+    # associative arrays for mapping tracks to various
+    # track attributes gathered from ffprobe and mediainfo
     declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
+    trap show_results_and_cleanup EXIT
     while true; do
+        # Perform cleanup tasks at beginning of each loop
         cleanup_async &
+
+        # If the user indicated they wanted a random track or that track selection should always be random,
+        # then select a random track. Otherwise, let user search for the next track
         if [[ "$fully_random" =~ ^[Yy]$ ]] || "$next_track_is_random"; then
             random_next_track
         else
             search_next_track
         fi
+        # Fill details for the current track into the associative arrays declared earlier
         generate_track_details
+        # Always randomly generate the timestamps for the first clip of a given track
         random_timestamps
+        # Ensure timestamps are reasonable
         sanitize_timestamps
+        # Generate the A and B clips
         create_clip
 
+        # decides whether the unknown x-clip is losslessly or MP3-encoded
         x_clip_quality=$(( RANDOM%2 ))
+
         x_test_attempted=false
         x_test_completed=false
         while true; do
+            # Present choices to the user about what to do, e.g. listen to the A or B clips,
+            # perform the x-test, save clips to disk, and more
             select_program
+            # Move to the next track if the user indicated to do so
             if [[ "$program_selection" =~ ^[NnFf]$ ]]; then
                 break
             fi
@@ -129,78 +158,88 @@ main() {
 
 # Reset parameters for numbered options list
 start_numbered_options_list() {
-    header="$*"
-    count=0
+    # options_list_header is an optional string displayed before the numbered options
+    options_list_header="$*"
+    options_count=0
     char_options=()
     option_strings=()
 }
 
-# Print and store an incrementing list of options for user selection
+# Store an option into incrementing list of options for user selection
 numbered_options_list_option() {
+    # The option is a string that should explain to the user what happens when they select the option
     local option=$1
+    # Char is a character that the user can enter to select the option instead of just the number value of the option
     local char=${2^^}
 
+    # E, Q, V, and W are reserved for use by page selection options
     if [[ "$char" && ! "$char" =~ ^[A-Z]$ ]] || [[ "$char" =~ [EQVW] ]]; then
         errr "Acceptable value for symbolic list option: A-Z excluding EQVW."
     fi
 
-    count=$(( count + 1 ))
+    options_count=$(( options_count + 1 ))
     if [[ "$char" ]]; then
-        char_options[count]=$char
-        local option_string="$count/$char) $option"
+        char_options[options_count]=$char
+        local option_string="$options_count/$char) $option"
     else
-        local option_string="$count) $option"
+        local option_string="$options_count) $option"
     fi
-    if (( ${#option_string} >= term_width )); then
-        local max_field_length=term_width
+
+    # Ellipsize any option strings that do not fit in the full terminal window
+    if (( ${#option_string} >= terminal_width )); then
+        local max_field_length=terminal_width
         option_string=$(ellipsize "$option_string")
     fi
+
     option_strings+=( "$option_string" )
 }
 
 # Calculate the index of the first option to appear on a given page
-# The output of `page_index 0` isn't the index of the first option of page 0,
-# but the first index of the next page that would go after the current end page if needed
-# Invoking the function this way is just convenient given how Bash handles negative array indices
 page_index() {
-    echo "$(( ${indices[$1 - 1]} + term_lines - ${#reserved_options[$1 - 1]} - header_line - prompt ))"
+    # The index of the first option on the previous page
+    # PLUS the number of lines on a terminal window
+    # MINUS the number of reserved options on the previous page
+    # MINUS one for the header line, if present
+    # MINUS one for the input prompt
+    local prompt=1
+    echo "$(( ${page_indices[$1 - 1]} + terminal_lines - ${#page_selection_options[$1 - 1]} - header_line - prompt ))"
 }
 
 # Prints the numbered options then prompts the user for input and validates against provided options
 user_selection() {
-    local -a reserved_options indices
-    if [[ "$header" ]]; then
+    local -a page_selection_options page_indices
+    if [[ "$options_list_header" ]]; then
         local header_line=1
     else
         local header_line=0
     fi
-    local prompt=1
     local page=0
-    indices[0]=1
-    while (( $(page_index 0) < ${#option_strings[@]} )); do
+    page_indices[0]=1
+    # Build each page of options sequentially until no options remain
+    while (( $(page_index $(( page + 1 ))) < ${#option_strings[@]} )); do
         if (( page == 0 )); then
-            reserved_options[0]=E # next
-            reserved_options[1]=V # previous
-            indices[1]=$(page_index 1)
+            page_selection_options[0]=E # next
+            page_selection_options[1]=V # previous
+            page_indices[1]=$(page_index 1)
         elif (( page == 1 )); then
-            reserved_options[0]=EW # next last
-            indices[1]=$(page_index 1)
-            reserved_options[1]=VE # previous next
-            indices[2]=$(page_index 2)
-            reserved_options[2]=QV # first previous
+            page_selection_options[0]=EW # next last
+            page_indices[1]=$(page_index 1)
+            page_selection_options[1]=VE # previous next
+            page_indices[2]=$(page_index 2)
+            page_selection_options[2]=QV # first previous
         elif (( page == 2 )); then
-            reserved_options[1]=VEW # previous next last
-            indices[2]=$(page_index 2)
-            reserved_options[2]=QVE # first previous next
-            indices[3]=$(page_index 3)
-            reserved_options[3]=QV # first previous
+            page_selection_options[1]=VEW # previous next last
+            page_indices[2]=$(page_index 2)
+            page_selection_options[2]=QVE # first previous next
+            page_indices[3]=$(page_index 3)
+            page_selection_options[3]=QV # first previous
         elif (( page > 2 )); then
-            indices[page - 1]=$(page_index "$(( page - 1 ))")
-            reserved_options[page - 1]=QVEW # first previous next last
-            indices[page]=$(page_index "$page")
-            reserved_options[page]=QVE # first previous next
-            indices[page + 1]=$(page_index "$(( page + 1 ))")
-            reserved_options[page + 1]=QV # first previous
+            page_indices[page - 1]=$(page_index $(( page - 1 )))
+            page_selection_options[page - 1]=QVEW # first previous next last
+            page_indices[page]=$(page_index "$page")
+            page_selection_options[page]=QVE # first previous next
+            page_indices[page + 1]=$(page_index $(( page + 1 )))
+            page_selection_options[page + 1]=QV # first previous
         fi
         page=$(( page + 1 ))
     done
@@ -215,86 +254,102 @@ user_selection() {
     fi
     local invalid_selection=false
 
+    # Loop for presenting options on the current page to the user and accepting input
     while true; do
-        clear -x >&2
-        if "$invalid_selection"; then
-            warn "Invalid selection: '$selection'"
-            read -rsp "Press enter to continue" _
-            clear -x >&2
-        fi
-        invalid_selection=false
-        if "$printinfo"; then
-            print_clip_info
-            echo
-        fi >&2
+        {
+            clear -x
+            if "$invalid_selection"; then
+                warn "Invalid selection: '$selection'"
+                read -rsp "Press enter to continue" _
+                clear -x
+            fi
+            invalid_selection=false
+            if "$printinfo"; then
+                print_clip_info
+                echo
+            fi
+            if [[ "$options_list_header" ]]; then
+                echo "$options_list_header"
+            fi
+        } >&2
 
-        [[ "$header" ]] && echo "$header" >&2
-        local start=${indices[page]}
-        if [[ "${indices[page + 1]}" ]]; then
-            local end=$(( ${indices[page + 1]} - 1 ))
+        # Determine the first and last indices for options to display on the current page
+        local start_index=${page_indices[page]}
+        if [[ "${page_indices[page + 1]}" ]]; then
+            local end_index=$(( ${page_indices[page + 1]} - 1 ))
         else
-            local end=$(( ${#option_strings[@]} ))
+            local end_index=$(( ${#option_strings[@]} ))
         fi
 
-        for i in $(seq "$start" "$end"); do
-            echo "${option_strings[i - 1]}"
-        done >&2
+        # Print all regular options from the start index to the end index, one option per line
+        printf '%s\n' "${option_strings[@]:start_index - 1:end_index - start_index + 1}" >&2
 
-        unset meta_options
-        local -a meta_options
+        unset page_selection_options_array
+        local -a page_selection_options_array
 
-        page_reserved_options=${reserved_options[page]}
-        for (( i=0; i<${#page_reserved_options}; i++)); do
-            option=${page_reserved_options:$i:1}
-            meta_options+=( "$option" )
+        # Print the page selection options and generate an array of them to select from later
+        current_page_selection_options=${page_selection_options[page]}
+        for (( i=0; i<${#current_page_selection_options}; i++)); do
+            option=${current_page_selection_options:$i:1}
+            page_selection_options_array+=( "$option" )
             case "$option" in
                 Q)
-                    echo "Q) First page" >&2 ;;
+                    echo "Q) First page" ;;
                 V)
-                    echo "V) Previous page" >&2 ;;
+                    echo "V) Previous page" ;;
                 E)
-                    echo "E) Next page" >&2 ;;
+                    echo "E) Next page" ;;
                 W)
-                    echo "W) Last page" >&2 ;;
+                    echo "W) Last page" ;;
             esac
-        done
+        done >&2
 
         local selection
         read -rp "$1" selection
 
+        # Retry on empty selection
         if [[ -z "$selection" ]]; then
             invalid_selection=true
             continue
         fi
 
-        for option_number in $(seq "$start" "$end"); do
-            local char_option=${char_options[option_number]}
-            if [[ "$selection" =~ ^[0-9]+$ ]] && (( 10#$selection == option_number )); then
+        # Loop through all presented options on this page to check if our selection matches one
+        local option_index
+        for option_index in $(seq "$start_index" "$end_index"); do
+            local char_option=${char_options[option_index]}
+            # If our selection was numeric and it matches the index of our current option,
+            # then we have made a valid selection
+            if [[ "$selection" =~ ^[0-9]+$ ]] && (( 10#$selection == option_index )); then
                 if [[ "$char_option" ]]; then
+                    # If there's a corresponding character to this option, print that
                     echo "$char_option"
                 else
+                    # Otherwise just print the numeric value
                     echo "$selection"
                 fi
                 return 0
+            # If we selected by character and it matches, we have made a valid selection. Print the character.
             elif [[ "${selection^^}" == "$char_option" ]]; then
                 echo "$char_option"
                 return 0
             fi
         done
 
+        # If no options matched our selection, selection may be a page selection option or an invalid selection
         if [[ "$selection" =~ ^[0-9]+$ ]]; then
-            local meta_options_index=$(( 10#$selection - end - 1 ))
-            if (( meta_options_index >= 0 )); then
-                selection=${meta_options[meta_options_index]}
+            local page_selection_options_array_index=$(( 10#$selection - end_index - 1 ))
+            if (( page_selection_options_array_index >= 0 )); then
+                selection=${page_selection_options_array[page_selection_options_array_index]}
             else
                 invalid_selection=true
                 continue
             fi
-        elif [[ ! "$selection" =~ ^[${reserved_options[page],,}${reserved_options[page]^^}]$ ]]; then
+        elif [[ ! "$selection" =~ ^[${page_selection_options[page],,}${page_selection_options[page]^^}]$ ]]; then
             invalid_selection=true
             continue
         fi
 
+        # If we selected a page selection option, go to the corresponding page
         case "${selection^^}" in
             Q)
                 page=0 ;;
@@ -313,53 +368,76 @@ user_selection() {
 # Provide the user with main options and take actions accordingly
 select_program() {
     start_numbered_options_list
+    # A test (original quality): Allow the user to listen to the clip in original quality
     numbered_options_list_option "A test (original quality)" "A"
+    # B test (lossy): Allow the user to listen to the clip as compressed with the MP3 algorithm
     numbered_options_list_option "B test (${bitrate::-1} kbps lossy)" "B"
+    # X test (unknown): Randomly and secretly presents the user with either original or MP3-compressed
+    # and asks the user to identify which quality level they listened to
+    # The x-test may only be attempted once per track
     if ! "$x_test_completed"; then
         numbered_options_list_option "X test (unknown)" "X"
     fi
+    # Re-clip track: Allow the user to select or randomly generate timestamps
+    # for a new clip from the current track
     numbered_options_list_option "Re-clip track" "R"
+    # Moving to the next track is only allowed if the x-test hasn't been attempted or it's been completed
     if ! "$x_test_attempted" || "$x_test_completed"; then
         if [[ "$fully_random" =~ ^[Yy]$ ]]; then
+            # Random next track: The next track is selected from the randomly sorted list generated at the start
             numbered_options_list_option "Random next track" "N"
         else
-            numbered_options_list_option "Find Next track" "F"
+            # Find next track: User is presented with options to search for the artist, album, and track title
+            numbered_options_list_option "Find next track" "F"
             numbered_options_list_option "Random next track" "N"
         fi
     fi
+    # Change bitrate: Change the bitrate to which the MP3-encoded track is compressed to.
+    # Selecting this option and subsequently altering the bitrate resets your score and track history
     numbered_options_list_option "Change bitrate" "C"
+    # Only present these options if applicable
     if (( ${#results[@]} > 0 )); then
+        # Print results: Print the current score and the results for each track played so far to the user
         numbered_options_list_option "Print results" "P"
+        # Reset score: Erase the list of tracks played so far and the results for each, along with the total score
         numbered_options_list_option "Reset score" "T"
     fi
+    # Save clip: If the user specified a directory to save clips to, allow them to save the current clip
+    # The clip can be saved in either original or MP3-compressed quality at the current selected bitrate
     if [[ -d "$clips_dir" ]]; then
         numbered_options_list_option "Save clip" "S"
     fi
+    # Quit: Exit the program
     numbered_options_list_option "Quit" "U"
 
+    # Allow the user to make a selection from the above options
     program_selection=$(user_selection --printinfo "Selection: ")
-    echo
+    echo >&2
     case "$program_selection" in
         A|a)
             play_clip "$original_clip" ;;
         B|b)
             play_clip "$lossy_clip" ;;
         X|x)
+            # If the x-clip doesn't exist yet, allocate a temp file for it
             if [[ ! -f "$x_clip" ]]; then
                 x_clip=$(mktemp --suffix=.wav)
             fi
             original_clip_modtime=$(stat -c "%Y" "$original_clip")
             x_clip_modtime=$(stat -c "%Y" "$x_clip")
+            # If the x-clip is empty or if the original clip is newer, then we want to copy over a new x-clip
             if [[ ! -s "$x_clip" ]] || (( original_clip_modtime > x_clip_modtime )); then
+                # x_clip_quality is randomly 0 or 1 with a 50% chance of each.
                 if (( x_clip_quality )); then
+                    # If 1, then the x-clip is original quality.
                     format=original
                     cp "$original_clip" "$x_clip"
                 else
+                    # Else if 0, then the x-clip is lossy/MP3-compressed
                     format=lossy
                     cp "$lossy_clip" "$x_clip"
                 fi
             fi
-            play_clip "$x_clip"
             x_test
             ;;
         S|s)
@@ -374,13 +452,13 @@ select_program() {
         T|t)
             reset_score ;;
         N|n)
-            if ! "$x_test_attempted" && ! "$x_test_completed"; then
+            if ! "$x_test_completed"; then
                 add_result skipped
             fi
             next_track_is_random=true
             ;;
         F|f)
-            if ! "$x_test_attempted" && ! "$x_test_completed"; then
+            if ! "$x_test_completed"; then
                 add_result skipped
             fi
             next_track_is_random=false
@@ -412,14 +490,12 @@ generate_timestamps() {
         numbered_options_list_option "Manual timestamps" "M"
         local timestamp_selection
         timestamp_selection=$(user_selection --printinfo "Selection: ")
-        echo
+        echo >&2
+
         if [[ "$timestamp_selection" =~ ^[Mm]$ ]]; then
-            user_timestamps
+            manual_timestamps
         elif [[ "$timestamp_selection" =~ ^[Rr]$ ]]; then
-            if ! random_timestamps; then
-                warn "Something went wrong with random timestamps"
-                return 1
-            fi
+            random_timestamps
         elif [[ "$timestamp_selection" =~ ^[Cc]$ ]]; then
             return 0
         else
@@ -432,25 +508,27 @@ generate_timestamps() {
 # Add track and test result information to the list of results
 add_result() {
     local track_info=${track_details_map["$track"]}
-    local numresults=$(( ${#results[@]} + 1 ))
-    if [[ "$1" == skipped ]]; then
+    local num_results=$(( ${#results[@]} + 1 ))
+    local result=$1
+    local guess=$2
+    if [[ "$result" == skipped ]]; then
         skipped=$(( skipped + 1 ))
-        local result="$numresults|$track_info|${1^}|${YELLOW}${1^}${NOCOLOR}"
-    elif [[ "$1" == quit ]]; then
-        local result="$numresults|$track_info|${1^}|${YELLOW}${1^}${NOCOLOR}"
-    elif [[ "$1" == forfeit ]]; then
+        local result_log="$num_results|$track_info|N/A|${YELLOW}${result^}${NOCOLOR}"
+    elif [[ "$result" == quit ]]; then
+        local result_log="$num_results|$track_info|N/A|${YELLOW}${result^}${NOCOLOR}"
+    elif [[ "$guess" == forfeit ]]; then
         incorrect=$(( incorrect + 1 ))
-        local result="$numresults|$track_info|${1^}|${RED}${1^}${NOCOLOR}"
-    elif [[ "$1" && "$2" && "$1" == "$2" ]]; then
+        local result_log="$num_results|$track_info|${result^}|${RED}${guess^}${NOCOLOR}"
+    elif [[ "$result" && "$guess" && "$result" == "$guess" ]]; then
         correct=$(( correct + 1 ))
-        local result="$numresults|$track_info|${1^}|${GREEN}${2^}${NOCOLOR}"
-    elif [[ "$1" && "$2" && "$1" != "$2" ]]; then
+        local result_log="$num_results|$track_info|${result^}|${GREEN}${guess^}${NOCOLOR}"
+    elif [[ "$result" && "$guess" && "$result" != "$guess" ]]; then
         incorrect=$(( incorrect + 1 ))
-        local result="$numresults|$track_info|${1^}|${RED}${2^}${NOCOLOR}"
+        local result_log="$num_results|$track_info|${result^}|${RED}${guess^}${NOCOLOR}"
     else
         return 1
     fi
-    results+=( "$result" )
+    results+=( "$result_log" )
 }
 
 # Choose the MP3 bitrate for the lossy clip
@@ -505,7 +583,7 @@ select_mp3_bitrate() {
             info "Bitrate selection is $bitrate"
             ;;
         *)
-            errr "Input must be between 1 and $count" ;;
+            errr "Input must be between 1 and $options_count" ;;
     esac
     if [[ -z "$last_bitrate" || "$bitrate" != "$last_bitrate" ]]; then
         reset_score
@@ -584,14 +662,16 @@ artist_search() {
 
     local artist_selection
     artist_selection=$(user_selection "Select an artist to search their albums: ")
-    if (( artist_selection == count )) || [[ "$artist_selection" =~ ^[Rr]$ ]]; then
+    if (( artist_selection == options_count )) || [[ "$artist_selection" =~ ^[Rr]$ ]]; then
         action=artist
-    elif (( artist_selection == count - 1 )) || [[ "$artist_selection" =~ ^[Nn]$ ]]; then
+    elif (( artist_selection == options_count - 1 )) || [[ "$artist_selection" =~ ^[Nn]$ ]]; then
         track=$(find "${matched_artists[@]}" -mindepth 2 -maxdepth 2 "${find_extensions[@]}" | sort -R | head -n 1)
         action=selected
-    elif (( ${#matched_artists[@]} > 1 && artist_selection == count - 2 )) || [[ "$artist_selection" =~ ^[Aa]$ ]]; then
+    elif (( ${#matched_artists[@]} > 1 && artist_selection == options_count - 2 )) ||
+        [[ "$artist_selection" =~ ^[Aa]$ ]]
+    then
         action=album
-    elif (( artist_selection <= count - 2 )); then
+    elif (( artist_selection <= options_count - 2 )); then
         matched_artists=( "${matched_artists[artist_selection - 1]}" ) # Search albums of a single artist
         action=album
     fi
@@ -600,7 +680,6 @@ artist_search() {
 # Search for an album with a given string
 album_search() {
     clear -x >&2
-    unset album_selection count
     start_numbered_options_list
     local search_string
     local findopts=( -mindepth 2 -maxdepth 2 "${find_extensions[@]}" )
@@ -627,16 +706,18 @@ album_search() {
 
     local album_selection
     album_selection=$(user_selection "Select an album: ")
-    if (( album_selection == count )) || [[ "$album_selection" =~ ^[Rr]$ ]]; then
+    if (( album_selection == options_count )) || [[ "$album_selection" =~ ^[Rr]$ ]]; then
         action=artist
-    elif (( album_selection == count - 1 )) || [[ "$album_selection" =~ ^[Ll]$ ]]; then
+    elif (( album_selection == options_count - 1 )) || [[ "$album_selection" =~ ^[Ll]$ ]]; then
         action=album
-    elif (( album_selection == count - 2 )) || [[ "$album_selection" =~ ^[Nn]$ ]]; then
+    elif (( album_selection == options_count - 2 )) || [[ "$album_selection" =~ ^[Nn]$ ]]; then
         track=$(find "${matched_albums[@]}" -mindepth 1 -maxdepth 1 "${find_extensions[@]}" | sort -R | head -n 1)
         action=selected
-    elif (( ${#matched_albums[@]} > 1 && album_selection == count - 3 )) || [[ "$album_selection" =~ ^[Aa]$ ]]; then
+    elif (( ${#matched_albums[@]} > 1 && album_selection == options_count - 3 )) ||
+        [[ "$album_selection" =~ ^[Aa]$ ]]
+    then
         action=track
-    elif (( album_selection <= count - 3 )); then
+    elif (( album_selection <= options_count - 3 )); then
         matched_albums=( "${matched_albums[album_selection - 1]}" ) # Search one album
         action=track
     fi
@@ -671,13 +752,13 @@ track_search() {
     numbered_options_list_option "Search artist again" "R"
 
     track_selection=$(user_selection "Select a track: ")
-    if (( track_selection == count )) || [[ "$track_selection" =~ ^[Rr]$ ]]; then
+    if (( track_selection == options_count )) || [[ "$track_selection" =~ ^[Rr]$ ]]; then
         action=artist
-    elif (( track_selection == count - 1 )) || [[ "$track_selection" =~ ^[Ll]$ ]]; then
+    elif (( track_selection == options_count - 1 )) || [[ "$track_selection" =~ ^[Ll]$ ]]; then
         action=album
-    elif (( track_selection == count - 2 )) || [[ "$track_selection" =~ ^[Tt]$ ]]; then
+    elif (( track_selection == options_count - 2 )) || [[ "$track_selection" =~ ^[Tt]$ ]]; then
         action=track
-    elif (( track_selection == count - 3 )) || [[ "$track_selection" =~ ^[Nn]$ ]]; then
+    elif (( track_selection == options_count - 3 )) || [[ "$track_selection" =~ ^[Nn]$ ]]; then
         track=$(IFS=$'\n'; sort -R <<< "${matched_tracks[*]}" | head -n 1)
         action=selected
     else
@@ -690,10 +771,10 @@ track_search() {
 # Iterate through the pre-generated array of random indices
 # and use each random index to select a track
 random_next_track() {
-    random_index=${random_order[track_index]}
-    track=${all_tracks[random_index]}
-    if (( ++track_index >= ${#all_tracks[@]} )); then
-        track_index=0
+    local random_track_index=${random_track_indices[current_track_index]}
+    track=${all_tracks[random_track_index]}
+    if (( ++current_track_index >= ${#all_tracks[@]} )); then
+        current_track_index=0
     fi
 }
 
@@ -724,7 +805,7 @@ generate_track_details() {
     IFS='|' read -r track_artist track_album track_title track_bitrate track_format < \
             <("${mediainfo:?}" --output="$mediainfo_output" "$mediainfo_track")
 
-    local max_field_length=$(( (term_width - 32)/3 ))
+    local max_field_length=$(( (terminal_width - 32)/3 ))
     track_artist_el=$(ellipsize "$track_artist")
     track_album_el=$(ellipsize "$track_album")
     track_title_el=$(ellipsize "$track_title")
@@ -761,7 +842,11 @@ create_clip() {
     create_clip_pid=$!
 }
 
-# Allows terminal to return to the user while program cleans up
+# Perform the following tasks in the background:
+# SIGTERM the clip creation process if it exists
+# Wait for the VLC child process to exit if it exists
+# Wait for the clip creation process to terminalinate
+# Remove all clips from the previous iteration
 cleanup_async() {
     if kill -0 "$create_clip_pid" 2>/dev/null; then
         kill "$create_clip_pid" 2>/dev/null
@@ -776,7 +861,7 @@ cleanup_async() {
 }
 
 # Create an original-quality clip and a lossy clip from a given track at the given timestamps
-# Obfuscate both original quality and lossy clips as .wav so it cannot easily be determined which is the X file
+# Obfuscate both original quality and lossy clips as .wav so it cannot easily be determinalined which is the X file
 create_clip_async() {
     "${ffmpeg:?}" -nostdin -loglevel error -y -i "$ffmpeg_track" \
         -ss "$startsec" -t "$clip_duration" "$ffmpeg_original_clip" \
@@ -800,7 +885,7 @@ seconds_to_timespec() {
 }
 
 # Prompt the user for timestamps to use for clipping
-user_timestamps() {
+manual_timestamps() {
     unset startsec endsec
     local startts endts
     while [[ -z "$startsec" ]]; do
@@ -916,6 +1001,7 @@ play_clip() {
 # Allows user to return to menu to try A or B test again or re-clip the current
 # track, but the user will not be able to skip ahead to the next track
 x_test() {
+    play_clip "$x_clip"
     local forfeit=false
     x_test_attempted=true
     start_numbered_options_list
@@ -928,9 +1014,9 @@ x_test() {
         return 0
     elif [[ "$retry_guess_forfeit" =~ ^[Ff]$ ]]; then
         forfeit=true
-        echo
+        echo >&2
         info "You forfeited. The file was ${format^^}"
-        add_result forfeit
+        add_result "$format" forfeit
     elif [[ ! "$retry_guess_forfeit" =~ ^[Gg]$ ]]; then
         errr "Unexpected condition occurred: retry_guess_forfeit='$retry_guess_forfeit'"
     fi
@@ -942,33 +1028,35 @@ x_test() {
             local guess
             guess=$(user_selection --printinfo "Selection: ")
             if [[ "$guess" =~ ^[Oo]$ ]]; then
-                local guess_fmt=original
+                local guess_format=original
             elif [[ "$guess" =~ ^[Ll]$ ]]; then
-                local guess_fmt=lossy
+                local guess_format=lossy
             else
                 errr "Unexpected condition occurred: guess='$guess'"
             fi
-            start_numbered_options_list "You guessed $guess_fmt. Are you sure?"
+            start_numbered_options_list "You guessed $guess_format. Are you sure?"
             numbered_options_list_option "Yes" "Y"
             numbered_options_list_option "No" "N"
             local confirmation
             confirmation=$(user_selection --printinfo "Selection: ")
         done
-        echo
-        if [[ "$guess_fmt" == "$format" ]]; then
-            echo "${GREEN}CORRECT!${NOCOLOR} The file was ${format^^} and your guess was ${guess_fmt^^}"
+        echo >&2
+        if [[ "$guess_format" == "$format" ]]; then
+            echo "${GREEN}CORRECT!${NOCOLOR} The file was ${format^^} and your guess was ${guess_format^^}"
         else
-            echo "${RED}INCORRECT.${NOCOLOR} The file was ${format^^} and your guess was ${guess_fmt^^}"
+            echo "${RED}INCORRECT.${NOCOLOR} The file was ${format^^} and your guess was ${guess_format^^}"
         fi
-        add_result "$format" "$guess_fmt"
+        add_result "$format" "$guess_format"
     fi
     accuracy=$(bc <<< "100 * $correct / ($correct + $incorrect)")
-    echo "Your accuracy is now $accuracy% ($correct/$(( correct + incorrect )))"
-    echo "$skipped tracks skipped"
-    echo
     x_test_completed=true
-    read -rsp "Press enter to continue:" _
-    echo
+    {
+        echo "Your accuracy is now $accuracy% ($correct/$(( correct + incorrect )))"
+        echo "$skipped tracks skipped"
+        echo
+        read -rsp "Press enter to continue:" _
+        echo
+    }
 }
 
 # Save either the lossy or original clip with a user-friendly name to the clips_dir
@@ -1046,15 +1134,15 @@ save_clip() {
 
 # Print out details about the clip
 print_clip_info() {
-    local max_field_length=$(( term_width - $(printf "Artist: " | wc -c) ))
+    local max_field_length=$(( terminal_width - $(printf "Artist: " | wc -c) ))
     local artist_el=$(ellipsize "${artists_map["$track"]}")
     echo "Artist: $artist_el"
 
-    max_field_length=$(( term_width - $(printf "Album: " | wc -c) ))
+    max_field_length=$(( terminal_width - $(printf "Album: " | wc -c) ))
     local album_el=$(ellipsize "${albums_map["$track"]}")
     echo "Album: $album_el"
 
-    max_field_length=$(( term_width - $(printf "Title: " | wc -c) ))
+    max_field_length=$(( terminal_width - $(printf "Title: " | wc -c) ))
     local title_el=$(ellipsize "${titles_map["$track"]}")
     echo "Title: $title_el"
 
@@ -1080,9 +1168,7 @@ print_results() {
         echo "Bitrate: ${bitrate::-1} kbps"
         {
             echo "Number|Artist|Album|Track|Result|Guess"
-            for result in "${results[@]}"; do
-                echo "$result"
-            done
+            printf '%s\n' "${results[@]}"
         } | column -ts '|'
         local tries=$(( correct + incorrect ))
         printf "%s%% accuracy, " "$accuracy"
@@ -1093,7 +1179,7 @@ print_results() {
             read -rsp "Press enter to continue:" _
             echo
         fi
-    fi
+    fi >&2
 }
 
 # Trap function to run on exit, displaying the results and deleting all files used
