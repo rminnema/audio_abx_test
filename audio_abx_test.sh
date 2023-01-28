@@ -118,10 +118,10 @@ main() {
     # associative arrays for mapping tracks to various
     # track attributes gathered from ffprobe and mediainfo
     declare -A track_details_map artists_map albums_map titles_map durations_map bitrate_map format_map
-    trap show_results_and_cleanup EXIT
+    trap exit_trap EXIT
     while true; do
         # Perform cleanup tasks at beginning of each loop
-        cleanup_async &
+        cleanup
 
         # If the user indicated they wanted a random track or that track selection should always be random,
         # then select a random track. Otherwise, let user search for the next track
@@ -350,8 +350,8 @@ user_selection() {
             *)
                 invalid_selection=true ;;
         esac
-    done >/dev/tty
-    echo "$selection"
+    done >/dev/tty # to allow this function to print to stdout even while using command substitution i.e. $() or ``
+    echo "$selection" # allow this particular variable to be captured
 }
 
 # Provide the user with main options and take actions accordingly
@@ -431,29 +431,38 @@ select_program() {
             x_test
             ;;
         S|s)
+            # Copy either A or B clip to a directory the user specified on cmdline or cfg file
             save_clip ;;
         P|p)
+            # Print the current score and results to the terminal
             print_results ;;
         C|c)
-            cleanup_async &
+            # Change the bitrate the MP3 file is encoded to
             select_mp3_bitrate
             create_clip
             ;;
         T|t)
+            # Erase the results and reset the score to 0
             reset_score ;;
         N|n)
+            # Go to the next track randomly
+            # Record this track as having been skipped if the x-test was not attempted or finished
             if ! "$x_test_completed"; then
                 add_result skipped
             fi
             next_track_is_random=true
             ;;
         F|f)
+            # Search for the next track
+            # Record this track as having been skipped if the x-test was not attempted or finished
             if ! "$x_test_completed"; then
                 add_result skipped
             fi
             next_track_is_random=false
             ;;
         U|u)
+            # Quit the application
+            # Record the current track we were on when we quit, unless we already attempted the x-test
             if ! "$x_test_completed"; then
                 add_result quit
             fi
@@ -461,7 +470,7 @@ select_program() {
             exit 0
             ;;
         R|r)
-            cleanup_async &
+            cleanup
             generate_timestamps
             create_clip
             ;;
@@ -575,8 +584,12 @@ select_mp3_bitrate() {
         *)
             errr "Input must be between 1 and ${#option_strings[@]}" ;;
     esac
-    if [[ -z "$last_bitrate" || "$bitrate" != "$last_bitrate" ]]; then
+    if [[ "$bitrate" != "$last_bitrate" ]]; then
+        cleanup
         reset_score
+        if [[ "$last_bitrate" ]]; then
+            create_clip
+        fi
     fi
     last_bitrate=$bitrate
 }
@@ -814,7 +827,8 @@ ellipsize() {
     sed -Ee "s/(.{$cut_length})....*$/\1.../" -e 's/\s*\.\.\.$/.../' <<< "$*"
 }
 
-# Wrapper around the async portion, allocates the temp filenames
+# Create an original-quality clip and a lossy clip from a given track at the given timestamps
+# Obfuscate both original quality and lossy clips as .wav so it cannot easily be determinalined which is the X file
 create_clip() {
     original_clip=$(mktemp --suffix=.wav)
     lossy_clip=$(mktemp --suffix=.wav)
@@ -828,34 +842,28 @@ create_clip() {
         local ffmpeg_lossy_clip=$(wslpath -w "$lossy_clip")
     fi
 
-    create_clip_async &
+    "${ffmpeg:?}" -nostdin -loglevel error -y -i "$ffmpeg_track" \
+        -ss "$startsec" -t "$clip_duration" "$ffmpeg_original_clip" \
+        -codec:a libmp3lame -ss "$startsec" -t "$clip_duration" -b:a "$bitrate" "$ffmpeg_lossy_clip" &
     create_clip_pid=$!
 }
 
 # Perform the following tasks in the background:
 # SIGTERM the clip creation process if it exists
 # Wait for the VLC child process to exit if it exists
-# Wait for the clip creation process to terminalinate
+# Wait for the clip creation process to terminate
 # Remove all clips from the previous iteration
-cleanup_async() {
-    if kill -0 "$create_clip_pid" 2>/dev/null; then
-        kill "$create_clip_pid" 2>/dev/null
-    fi
-    while kill -0 "$vlc_pid" 2>/dev/null; do
-        sleep 0.1
-    done
-    while kill -0 "$create_clip_pid" 2>/dev/null; do
-        sleep 0.1
-    done
-    rm -f "$original_clip" "$lossy_clip" "$x_clip"
-}
-
-# Create an original-quality clip and a lossy clip from a given track at the given timestamps
-# Obfuscate both original quality and lossy clips as .wav so it cannot easily be determinalined which is the X file
-create_clip_async() {
-    "${ffmpeg:?}" -nostdin -loglevel error -y -i "$ffmpeg_track" \
-        -ss "$startsec" -t "$clip_duration" "$ffmpeg_original_clip" \
-        -codec:a libmp3lame -ss "$startsec" -t "$clip_duration" -b:a "$bitrate" "$ffmpeg_lossy_clip"
+cleanup() {
+    (
+        kill "$create_clip_pid"
+        while kill -0 "$vlc_pid"; do
+            sleep 1
+        done
+        while kill -0 "$create_clip_pid"; do
+            sleep 1
+        done
+        rm -f "$original_clip" "$lossy_clip" "$x_clip"
+    ) &>/dev/null &
 }
 
 # Generate random timestamps to use for clipping
@@ -865,7 +873,8 @@ random_timestamps() {
     if (( track_duration_int < clip_duration)); then
         clip_duration=$track_duration_int
     fi
-    startsec=$(shuf -i 0-"$(( track_duration_int - clip_duration ))" -n 1 --random-source=/dev/urandom)
+    local clip_start_max=$(( track_duration_int - clip_duration ))
+    startsec=$(shuf -i 0-$clip_start_max -n 1 --random-source=/dev/urandom)
     endsec=$(( startsec + clip_duration ))
 }
 
@@ -981,6 +990,7 @@ play_clip() {
         info "Please wait while the encoding job finishes."
         wait "$create_clip_pid"
     fi
+
     "${vlc:?}" "$vlc_clip" &>/dev/null &
     vlc_pid=$!
 }
@@ -1173,9 +1183,8 @@ print_results() {
     fi
 }
 
-# Trap function to run on exit, displaying the results and deleting all files used
-show_results_and_cleanup() {
-    cleanup_async &
+exit_trap() {
+    cleanup
     print_results
 }
 
