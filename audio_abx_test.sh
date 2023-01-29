@@ -7,12 +7,24 @@ readonly BLUE=$'\E[34m'
 readonly NOCOLOR=$'\E[0m'
 
 # Functions for printing different message types to the terminal
-errr() { printf "%sERROR:%s %s\n" "$RED" "$NOCOLOR" "$*" >&2; exit 1; }
-warn() { printf "%sWARNING:%s %s\n" "$YELLOW" "$NOCOLOR" "$*" >&2; }
+errr() { printf "%sERROR:%s %s\n" "$RED" "$NOCOLOR" "$*"; exit 1; }
+warn() { printf "%sWARNING:%s %s\n" "$YELLOW" "$NOCOLOR" "$*"; }
 info() { printf "%sInfo:%s %s\n" "$BLUE" "$NOCOLOR" "$*"; }
 
 # Main program logic
 main() {
+    # Detect if stdout or stderr is being piped or redirected
+    if [[ ! -t 1 || ! -t 2 ]]; then
+        {
+            warn "This program prints to the terminal only!"
+            echo "To log output, use the --output_file command line option"
+            read -rsp "Press enter to continue." _
+        } >/dev/tty 2>&1
+    fi
+
+    # Just print everything to the terminal
+    exec >/dev/tty 2>&1
+
     # Grab terminal lines and columns
     terminal_width=$(tput cols)
     terminal_lines=$(tput lines)
@@ -39,10 +51,27 @@ main() {
                 default_duration=$1
                 shift
                 ;;
+            --output_file)
+                output_file=$1
+                shift
+                ;;
+            --overwrite)
+                overwrite=true
+                ;;
             *)
                 errr "Unrecognized parameter '$param'" ;;
         esac
     done
+
+    if [[ "$output_file" ]]; then
+        if [[ ! -f "$output_file" || "$overwrite" == true ]]; then
+            # Output to terminal, and simultaneously strip color and other control codes from output
+            # before saving it to the specified output file
+            exec > >(tee /dev/tty | sed -r 's/\x1B\[([0-9]{1,3}(;[0-9]{1,2};?)?)?[mGK]//g' > "$output_file") 2>&1
+        else
+            errr "$output_file exists but --overwrite was not given. Exiting."
+        fi
+    fi
 
     # Process config file
     if [[ -f "$config_file" ]]; then
@@ -74,14 +103,12 @@ main() {
     numbered_options_list_option "Yes" "Y"
     numbered_options_list_option "No" "N"
     fully_random=$(user_selection "Selection: ")
-    echo
 
     start_numbered_options_list "Source file quality selection"
     numbered_options_list_option "All files" "A"
     numbered_options_list_option "Lossless only" "S"
     numbered_options_list_option "Lossy only" "Y"
     source_quality=$(user_selection "Selection: ")
-    echo
 
     if [[ "$source_quality" =~ ^[Aa]$ ]]; then
         # Selection: "All"
@@ -200,158 +227,167 @@ page_index() {
 
 # Prints the numbered options then prompts the user for input and validates against provided options
 user_selection() {
-    local -a page_selection_options page_indices
-    if [[ "$options_list_header" ]]; then
-        local header_line=1
-    else
-        local header_line=0
-    fi
-    local page=0
-    page_indices[0]=1
-    # Build each page of options sequentially until no options remain
-    while (( $(page_index $(( page + 1 ))) < ${#option_strings[@]} )); do
-        if (( page == 0 )); then
-            page_selection_options[0]=E # next
-            page_selection_options[1]=V # previous
-            page_indices[1]=$(page_index 1)
-        elif (( page == 1 )); then
-            page_selection_options[0]=EW # next last
-            page_indices[1]=$(page_index 1)
-            page_selection_options[1]=VE # previous next
-            page_indices[2]=$(page_index 2)
-            page_selection_options[2]=QV # first previous
-        elif (( page == 2 )); then
-            page_selection_options[1]=VEW # previous next last
-            page_indices[2]=$(page_index 2)
-            page_selection_options[2]=QVE # first previous next
-            page_indices[3]=$(page_index 3)
-            page_selection_options[3]=QV # first previous
-        elif (( page > 2 )); then
-            page_indices[page - 1]=$(page_index $(( page - 1 )))
-            page_selection_options[page - 1]=QVEW # first previous next last
-            page_indices[page]=$(page_index "$page")
-            page_selection_options[page]=QVE # first previous next
-            page_indices[page + 1]=$(page_index $(( page + 1 )))
-            page_selection_options[page + 1]=QV # first previous
-        fi
-        page=$(( page + 1 ))
-    done
-    local pages=$(( page + 1 ))
-    page=0
-
-    if [[ "$1" == '--printinfo' ]]; then
-        local printinfo=true
-        shift
-    else
-        local printinfo=false
-    fi
-    local invalid_selection=false
-
-    # Loop for presenting options on the current page to the user and accepting input
-    while true; do
-        clear -x
-        if "$invalid_selection"; then
-            warn "Invalid selection: '$selection'"
-            read -rsp "Press enter to continue" _
-            clear -x
-        fi
-        invalid_selection=false
-        if "$printinfo"; then
-            print_clip_info
-            echo
-        fi
+    {
+        local -a page_selection_options page_indices
         if [[ "$options_list_header" ]]; then
-            echo "$options_list_header"
-        fi
-
-        # Determine the first and last indices for options to display on the current page
-        local start_index=${page_indices[page]}
-        if [[ "${page_indices[page + 1]}" ]]; then
-            local end_index=$(( ${page_indices[page + 1]} - 1 ))
+            local header_line=1
         else
-            local end_index=${#option_strings[@]}
+            local header_line=0
         fi
-
-        # Print all regular options from the start index to the end index, one option per line
-        printf '%s\n' "${option_strings[@]:start_index - 1:end_index - start_index + 1}"
-
-        unset page_selection_options_array
-        local -a page_selection_options_array
-
-        # Print the page selection options and generate an array of them to select from later
-        current_page_selection_options=${page_selection_options[page]}
-        for (( i=0; i<${#current_page_selection_options}; i++)); do
-            option=${current_page_selection_options:$i:1}
-            page_selection_options_array+=( "$option" )
-            case "$option" in
-                Q)
-                    echo "Q) First page" ;;
-                V)
-                    echo "V) Previous page" ;;
-                E)
-                    echo "E) Next page" ;;
-                W)
-                    echo "W) Last page" ;;
-            esac
-        done
-
-        local selection
-        read -rp "$1" selection
-
-        # Retry on empty selection
-        if [[ -z "$selection" ]]; then
-            invalid_selection=true
-            continue
-        fi
-
-        # Loop through all presented options on this page to check if our selection matches one
-        local option_index
-        for option_index in $(seq "$start_index" "$end_index"); do
-            local char_option=${char_options[option_index]}
-            # If our selection was numeric and it matches the index of our current option,
-            # then we have made a valid selection
-            if [[ "$selection" =~ ^[0-9]+$ ]] && (( 10#$selection == option_index )); then
-                if [[ "$char_option" ]]; then
-                    # If there's a corresponding character to this option, print that
-                    selection=$char_option
-                fi
-                break 2
-            # If we selected by character and it matches, we have made a valid selection
-            elif [[ "${selection^^}" == "$char_option" ]]; then
-                break 2
-                selection=$char_option
+        local page=0
+        page_indices[0]=1
+        # Build each page of options sequentially until no options remain
+        while (( $(page_index $(( page + 1 ))) < ${#option_strings[@]} )); do
+            if (( page == 0 )); then
+                page_selection_options[0]=E # next
+                page_selection_options[1]=V # previous
+                page_indices[1]=$(page_index 1)
+            elif (( page == 1 )); then
+                page_selection_options[0]=EW # next last
+                page_indices[1]=$(page_index 1)
+                page_selection_options[1]=VE # previous next
+                page_indices[2]=$(page_index 2)
+                page_selection_options[2]=QV # first previous
+            elif (( page == 2 )); then
+                page_selection_options[1]=VEW # previous next last
+                page_indices[2]=$(page_index 2)
+                page_selection_options[2]=QVE # first previous next
+                page_indices[3]=$(page_index 3)
+                page_selection_options[3]=QV # first previous
+            elif (( page > 2 )); then
+                page_indices[page - 1]=$(page_index $(( page - 1 )))
+                page_selection_options[page - 1]=QVEW # first previous next last
+                page_indices[page]=$(page_index "$page")
+                page_selection_options[page]=QVE # first previous next
+                page_indices[page + 1]=$(page_index $(( page + 1 )))
+                page_selection_options[page + 1]=QV # first previous
             fi
+            page=$(( page + 1 ))
         done
+        local pages=$(( page + 1 ))
+        page=0
 
-        # If no options matched our selection, selection may be a page selection option or an invalid selection
-        if [[ "$selection" =~ ^[0-9]+$ ]]; then
-            local page_selection_options_array_index=$(( 10#$selection - end_index - 1 ))
-            if (( page_selection_options_array_index >= 0 )); then
-                selection=${page_selection_options_array[page_selection_options_array_index]}
+        if [[ "$1" == '--printinfo' ]]; then
+            local printinfo=true
+            shift
+        else
+            local printinfo=false
+        fi
+        local invalid_selection=false
+
+        # Loop for presenting options on the current page to the user and accepting input
+        while true; do
+            reset_screen
+            if "$invalid_selection"; then
+                warn "Invalid selection: '$selection'"
+                read -rsp "Press enter to continue" _
+                reset_screen
+            fi
+            invalid_selection=false
+            if "$printinfo"; then
+                print_clip_info
+                echo
+            fi
+            if [[ "$options_list_header" ]]; then
+                echo "$options_list_header"
+            fi
+
+            # Determine the first and last indices for options to display on the current page
+            local start_index=${page_indices[page]}
+            if [[ "${page_indices[page + 1]}" ]]; then
+                local end_index=$(( ${page_indices[page + 1]} - 1 ))
             else
+                local end_index=${#option_strings[@]}
+            fi
+
+            # Print all regular options from the start index to the end index, one option per line
+            printf '%s\n' "${option_strings[@]:start_index - 1:end_index - start_index + 1}"
+
+            unset page_selection_options_array
+            local -a page_selection_options_array
+
+            # Print the page selection options and generate an array of them to select from later
+            current_page_selection_options=${page_selection_options[page]}
+            for (( i=0; i < ${#current_page_selection_options}; i++ )); do
+                option=${current_page_selection_options:$i:1}
+                page_selection_options_array+=( "$option" )
+                case "$option" in
+                    Q)
+                        echo "Q) First page" ;;
+                    V)
+                        echo "V) Previous page" ;;
+                    E)
+                        echo "E) Next page" ;;
+                    W)
+                        echo "W) Last page" ;;
+                esac
+            done
+
+            local selection
+            read -rp "$1" selection
+
+            # Retry on empty selection
+            if [[ -z "$selection" ]]; then
                 invalid_selection=true
                 continue
             fi
-        elif [[ ! "$selection" =~ ^[${page_selection_options[page],,}${page_selection_options[page]^^}]$ ]]; then
-            invalid_selection=true
-            continue
-        fi
 
-        # If we selected a page selection option, go to the corresponding page
-        case "${selection^^}" in
-            Q)
-                page=0 ;;
-            W)
-                page=$(( pages - 1 )) ;;
-            E)
-                page=$(( page + 1 )) ;;
-            V)
-                page=$(( page - 1 )) ;;
-            *)
-                invalid_selection=true ;;
-        esac
-    done >/dev/tty # to allow this function to print to stdout even while using command substitution i.e. $() or ``
-    echo "$selection" # allow this particular variable to be captured
+            # Loop through all presented options on this page to check if our selection matches one
+            local option_index
+            for option_index in $(seq "$start_index" "$end_index"); do
+                local char_option=${char_options[option_index]}
+                # If our selection was numeric and it matches the index of our current option,
+                # then we have made a valid selection
+                if [[ "$selection" =~ ^[0-9]+$ ]] && (( 10#$selection == option_index )); then
+                    if [[ "$char_option" ]]; then
+                        # If there's a corresponding character to this option, print that
+                        selection=$char_option
+                    fi
+                    break 2
+                # If we selected by character and it matches, we have made a valid selection
+                elif [[ "${selection^^}" == "$char_option" ]]; then
+                    break 2
+                    selection=$char_option
+                fi
+            done
+
+            # If no options matched our selection, selection may be a page selection option or an invalid selection
+            if [[ "$selection" =~ ^[0-9]+$ ]]; then
+                local page_selection_options_array_index=$(( 10#$selection - end_index - 1 ))
+                if (( page_selection_options_array_index >= 0 )); then
+                    selection=${page_selection_options_array[page_selection_options_array_index]}
+                else
+                    invalid_selection=true
+                    continue
+                fi
+            elif [[ ! "$selection" =~ ^[${page_selection_options[page],,}${page_selection_options[page]^^}]$ ]]; then
+                invalid_selection=true
+                continue
+            fi
+
+            # If we selected a page selection option, go to the corresponding page
+            case "${selection^^}" in
+                Q)
+                    page=0 ;;
+                W)
+                    page=$(( pages - 1 )) ;;
+                E)
+                    page=$(( page + 1 )) ;;
+                V)
+                    page=$(( page - 1 )) ;;
+                *)
+                    invalid_selection=true ;;
+            esac
+        done
+    } >&2
+    # so that this function prints to terminal, even while using command substitution i.e. $(foo) or `foo`
+
+    echo "$selection"
+}
+
+reset_screen() {
+    head -c "$terminal_width" /dev/zero | tr '\0' '-' | xargs printf '\n%s'
+    clear -x >/dev/tty
 }
 
 # Provide the user with main options and take actions accordingly
@@ -401,7 +437,6 @@ select_program() {
 
     # Allow the user to make a selection from the above options
     program_selection=$(user_selection --printinfo "Selection: ")
-    echo
 
     case "$program_selection" in
         A|a)
@@ -489,7 +524,6 @@ generate_timestamps() {
         numbered_options_list_option "Manual timestamps" "M"
         local timestamp_selection
         timestamp_selection=$(user_selection --printinfo "Selection: ")
-        echo
 
         if [[ "$timestamp_selection" =~ ^[Mm]$ ]]; then
             manual_timestamps
@@ -532,11 +566,7 @@ add_result() {
 
 # Choose the MP3 bitrate for the lossy clip
 select_mp3_bitrate() {
-    clear -x
     start_numbered_options_list "Select a bitrate for MP3 compression of the lossy file."
-    if [[ "$last_bitrate" ]]; then
-        warn "Changing your bitrate will reset your score and progress."
-    fi
     local bitrate_option
     for bitrate_option in 32 64 96 112 128 256 320; do
         if [[ "$bitrate" && "$bitrate_option" == "${bitrate::-1}" ]]; then
@@ -548,7 +578,6 @@ select_mp3_bitrate() {
     numbered_options_list_option "Custom" "C"
     local bitrate_selection
     bitrate_selection=$(user_selection "Selection: ")
-    echo
     case "$bitrate_selection" in
         1)
             bitrate=32k ;;
@@ -637,7 +666,7 @@ utf8_array_search() {
 
 # Search for an artist with a given string
 artist_search() {
-    clear -x
+    reset_screen
     if "$nomatch"; then
         warn "No artists matched the search string provided."
     fi
@@ -682,7 +711,7 @@ artist_search() {
 
 # Search for an album with a given string
 album_search() {
-    clear -x
+    reset_screen
     start_numbered_options_list
     local search_string
     local findopts=( -mindepth 2 -maxdepth 2 "${find_extensions[@]}" )
@@ -728,7 +757,7 @@ album_search() {
 
 # Search for a track with a given string
 track_search() {
-    clear -x
+    reset_screen
     local -a tracks matched_tracks matched_track_indices
     local search_string track_selection
     local findopts=( -mindepth 1 -maxdepth 1 "${find_extensions[@]}" )
@@ -1013,7 +1042,6 @@ x_test() {
         return 0
     elif [[ "$retry_guess_forfeit" =~ ^[Ff]$ ]]; then
         forfeit=true
-        echo
         add_result "$format" forfeit
     elif [[ ! "$retry_guess_forfeit" =~ ^[Gg]$ ]]; then
         errr "Unexpected condition occurred: retry_guess_forfeit='$retry_guess_forfeit'"
@@ -1038,7 +1066,6 @@ x_test() {
             local confirmation
             confirmation=$(user_selection --printinfo "Selection: ")
         done
-        echo
         if [[ "$guess_format" == "$format" ]]; then
             echo "${GREEN}CORRECT!${NOCOLOR} The file was ${format^^} and your guess was ${guess_format^^}"
         else
@@ -1048,13 +1075,10 @@ x_test() {
     fi
     accuracy=$(bc <<< "100 * $correct / ($correct + $incorrect)")
     x_test_completed=true
-    {
-        echo "Your accuracy is now $accuracy% ($correct/$(( correct + incorrect )))"
-        echo "$skipped tracks skipped"
-        echo
-        read -rsp "Press enter to continue:" _
-        echo
-    }
+    echo "Your accuracy is now $accuracy% ($correct/$(( correct + incorrect )))"
+    echo "$skipped tracks skipped"
+    echo
+    read -rsp "Press enter to continue:" _
 }
 
 # Save either the lossy or original clip with a user-friendly name to the clips_dir
@@ -1066,7 +1090,6 @@ save_clip() {
     numbered_options_list_option "Cancel and return to main menu" "C"
     local save_choice_1
     save_choice_1=$(user_selection "Selection: ")
-    echo
 
     if [[ "$save_choice_1" =~ ^[Oo]$ ]]; then
         local compression=original
@@ -1130,7 +1153,6 @@ save_clip() {
         fi
     fi
     read -rsp "Press enter to continue:" _
-    echo
 }
 
 # Print out details about the clip
@@ -1157,7 +1179,7 @@ print_clip_info() {
 # Along with the results and guesses for each X test
 print_results() {
     if (( ${#results[@]} > 0 )); then
-        clear -x
+        reset_screen
         if [[ -z "$quit" ]]; then
             echo "Current track info:"
             {
@@ -1178,7 +1200,6 @@ print_results() {
         printf "%s skipped\n" "$skipped"
         if [[ -z "$quit" ]]; then
             read -rsp "Press enter to continue:" _
-            echo
         fi
     fi
 }
