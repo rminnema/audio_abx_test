@@ -381,7 +381,7 @@ user_selection() {
                     invalid_selection=true ;;
             esac
         done
-    } >/dev/tty
+    } >/dev/tty 2>&1
     # so that this function prints to terminal, even while using command substitution i.e. $(foo) or `foo`
 
     echo "$selection"

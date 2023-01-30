@@ -12,6 +12,8 @@ OPTIONS:
 - --config\_file: Path to a configuration file containing parameters for music\_dir and clips\_dir. Options given in the configuration file are overridden by options given on the command line. Assumed path for config\_file is ~/audio\_abx\_test.cfg. The format for the configuration file is just `KEY=VALUE` with no quotation marks
 - --music\_dir: Path to the directory containing music tracks for use in ABX testing.
 - --clips\_dir: Path to the directory where you wish to store clips.
+- --default\_duration: Controls the duration of clips generated with random timestamps.
+- --output\_file: Path to a file to save output to. If the file exists, you must also give --overwrite to replace the file with the output from this run. Otherwise the program will exit.
 
 Audio ABX Test makes some assumptions about the structure of your music directory tree. The expectation is for directories named for artists to reside at the top level, with directories within each artist directory corresponding to albums by that artist, and files within each album directory corresponding to tracks on that album. Track filenames are expected to start with a natural number indicating its position on the album, followed by a space, a hyphen, another space, the name of the track, and the file extension.
 
