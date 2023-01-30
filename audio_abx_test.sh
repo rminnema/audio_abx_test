@@ -15,15 +15,17 @@ info() { printf "%sInfo:%s %s\n" "$BLUE" "$NOCOLOR" "$*"; }
 main() {
     # Detect if stdout or stderr is being piped or redirected
     if [[ ! -t 1 || ! -t 2 ]]; then
-        {
-            warn "This program prints to the terminal only!"
-            echo "To log output, use the --output_file command line option"
-            read -rsp "Press enter to continue." _
-        } >/dev/tty 2>&1
+        output_warning=true
     fi
 
     # Just print everything to the terminal
     exec >/dev/tty 2>&1
+
+    if [[ "$output_warning" == true ]]; then
+        warn "This program prints to the terminal only!"
+        echo "To log output, use the --output_file command line option"
+        read -rsp "Press enter to continue." _
+    fi
 
     # Grab terminal lines and columns
     terminal_width=$(tput cols)
@@ -67,7 +69,7 @@ main() {
         if [[ ! -f "$output_file" || "$overwrite" == true ]]; then
             # Output to terminal, and simultaneously strip color and other control codes from output
             # before saving it to the specified output file
-            exec > >(tee /dev/tty | sed -r 's/\x1B\[([0-9]{1,3}(;[0-9]{1,2};?)?)?[mGK]//g' > "$output_file") 2>&1
+            exec > >(tee /dev/tty | sed -r 's/\x1B\[([0-9]{1,3}(;[0-9]{1,2};?)?)?[mGKHJ]//g' > "$output_file") 2>&1
         else
             errr "$output_file exists but --overwrite was not given. Exiting."
         fi
@@ -387,7 +389,7 @@ user_selection() {
 
 reset_screen() {
     head -c "$terminal_width" /dev/zero | tr '\0' '-' | xargs printf '\n%s'
-    clear -x >/dev/tty
+    clear -x
 }
 
 # Provide the user with main options and take actions accordingly

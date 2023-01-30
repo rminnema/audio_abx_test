@@ -1,4 +1,4 @@
 .shellcheckrc
-test
 trace.txt
-clips
+test/**
+clips/**
