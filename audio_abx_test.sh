@@ -863,19 +863,28 @@ ellipsize() {
 create_clip() {
     original_clip=$(mktemp --suffix=.wav)
     lossy_clip=$(mktemp --suffix=.wav)
+    tmp_mp3=$(mktemp --suffix=.mp3)
     if [[ "${ffmpeg:?}" == *ffmpeg ]]; then
         local ffmpeg_track=$track
         local ffmpeg_original_clip=$original_clip
         local ffmpeg_lossy_clip=$lossy_clip
+        local ffmpeg_mp3=$tmp_mp3
     else
         local ffmpeg_track=$(wslpath -w "$track")
         local ffmpeg_original_clip=$(wslpath -w "$original_clip")
         local ffmpeg_lossy_clip=$(wslpath -w "$lossy_clip")
+        local ffmpeg_mp3=$(wslpath -w "$tmp_mp3")
     fi
 
-    "${ffmpeg:?}" -nostdin -loglevel error -y -i "$ffmpeg_track" \
-        -ss "$startsec" -t "$clip_duration" "$ffmpeg_original_clip" \
-        -codec:a libmp3lame -ss "$startsec" -t "$clip_duration" -b:a "$bitrate" "$ffmpeg_lossy_clip" &
+    (
+        "${ffmpeg:?}" -nostdin -loglevel fatal -y \
+            -ss "$startsec" -t "$clip_duration" -i "$ffmpeg_track" \
+            "$ffmpeg_original_clip" -codec:a libmp3lame -b:a "$bitrate" "$ffmpeg_mp3"
+
+        "${ffmpeg:?}" -nostdin -loglevel fatal -y -i "$ffmpeg_mp3" "$ffmpeg_lossy_clip"
+
+        rm -f "$tmp_mp3"
+    ) &
     create_clip_pid=$!
 }
 
@@ -893,7 +902,7 @@ cleanup() {
         while kill -0 "$create_clip_pid"; do
             sleep 1
         done
-        rm -f "$original_clip" "$lossy_clip" "$x_clip"
+        rm -f "$original_clip" "$lossy_clip" "$x_clip" "$tmp_mp3"
     ) &>/dev/null &
 }
 
